@@ -13,7 +13,6 @@ QgsProject, QgsVectorLayer, QgsRasterLayer,
 QgsVectorFileWriter, QgsWkbTypes,
 QgsRectangle, QgsFeatureRequest
 )
-
 class GeospatialDataPreparation:
     """Classe para preparação de dados geoespaciais"""
 
@@ -54,8 +53,8 @@ class GeospatialDataPreparation:
             'crs': 'EPSG:4326'
         }
 
-        uri = f"url={params['url']}&amp;layers={params['layers']}&amp;" \
-            f"styles={params['styles']}&amp;format={params['format']}&amp;" \
+        uri = f"url={params['url']} & layers={params['layers']} &" \
+            f"styles={params['styles']} & format={params['format']} &" \
             f"crs={params['crs']}"
 
         wms_layer = QgsRasterLayer(uri, 'WMS Layer', 'wms')
@@ -371,4 +370,83 @@ class GeospatialDataPreparation:
 
         print(f"Arquivo de mapeamento criado: {output_path}")
 
-     
+def main():
+    """Função principal com exemplo de uso completo"""
+
+    # Inicializar preparador
+    prep = GeospatialDataPreparation('/media/calebe/SSD/imagens/projeto_imagens.qgz')
+
+    # 1. Carregar camadas WMS/WFS
+    wms_url = 'https://ide.geobases.es.gov.br/geoserver/ows?service=wms&version=1.3.0&request=GetCapabilities'
+    wms_layer = prep.load_wms_layer(wms_url, 'IJSN - ORTOFOTOMOSAICO ES - KOMPSAT 3-3A - 2019-2020')
+
+    # 2. Extrair metadados
+    if wms_layer:
+        metadata = prep.extract_layer_metadata(wms_layer)
+        metadata_path = os.path.join(prep.metadata_dir, 'wms_metadata.json')
+        with open(metadata_path, 'w') as f:
+            json.dump(metadata, f, indent=2)
+    
+    # 3. Carregar anotações vetoriais
+    annotations = QgsProject.instance().mapLayersByName('anotacoes')[0]
+    
+    # 4. Exportar anotações para CSV
+    csv_path = os.path.join(prep.metadata_dir, 'annotations.csv')
+    prep.export_vector_to_csv(annotations, csv_path)
+
+    # 5. Criar arquivo de mapeamento de classes
+    class_mapping = {
+        "0": "Afloramento Rochoso",
+        "1": "Área Edificada",
+        "2": "Brejo",
+        "3": "Campo Rupestre/Altitude",
+        "4": "Cultivo Agrícola - Abacaxi",
+        "5": "Cultivo Agrícola - Banana",
+        "6": "Cultivo Agrícola - Café",
+        "7": "Cultivo Agrícola - Cana-de-Açúcar",
+        "8": "Cultivo Agrícola - Coco-Da-Baía",
+        "9": "Cultivo Agrícola - Mamão",
+        "10": "Cultivo Agrícola - Outros Cultivos Permanentes",
+        "11": "Cultivo Agrícola - Outros Cultivos Temporários",
+        "12": "Extração Mineração",
+        "13": "Macega",
+        "14": "Mangue",
+        "15": "Massa D'Àgua",
+        "16": "Mata Nativa",
+        "17": "Mata Nativa em Estágio Inicial de Regeneração",
+        "18": "Outros",
+        "19": "Pastagem",
+        "20": "Reflorestamento - Eucalipto",
+        "21": "Reflorestamento - Pinus",
+        "22": "Reflorestamento - Seringueira",
+        "23": "Restinga",
+        "24": "Solo Exposto",
+    }
+
+    mapping_path = os.path.join(prep.metadata_dir, 'class_mapping.json')
+    prep.create_class_mapping_file(class_mapping, mapping_path)
+
+    coords_csv = '/media/calebe/SSD/first_test_code/coordenadas.csv'
+    if os.path.exists(coords_csv):
+        prep.download_tiles_from_csv(coords_csv, wms_layer, prep.images_dir)
+
+    # 7. Criar máscaras em lote
+    reference_raster = QgsProject.instance().mapLayersByName('imagem_ref')[0]
+    image_ids = range(1, 101) # IDs de 1 a 100
+    prep.batch_create_masks(annotations, reference_raster, prep.masks_dir, image_ids)
+
+    # 8. Validar dataset
+    validation_report = prep.validate_dataset(prep.images_dir, prep.masks_dir)
+
+    # Salvar relatório
+    report_path = os.path.join(prep.metadata_dir, 'validation_report.json')
+    with open(report_path, 'w') as f:
+        json.dump(validation_report, f, indent=2)
+
+    print("\n=== Processamento Completo! ===")
+    print(f"Imagens: {prep.images_dir}")
+    print(f"Máscaras: {prep.masks_dir}")
+    print(f"Metadados: {prep.metadata_dir}")
+
+if __name__ == '__main__':
+    main()
