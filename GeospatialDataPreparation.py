@@ -377,13 +377,23 @@ def main():
     prep = GeospatialDataPreparation('/media/calebe/SSD/imagens/projeto_imagens.qgz')
 
     # 1. Carregar camadas WMS/WFS
-    wms_url = 'https://ide.geobases.es.gov.br/geoserver/ows?service=wms&version=1.3.0&request=GetCapabilities'
-    wms_layer = prep.load_wms_layer(wms_url, 'IJSN - ORTOFOTOMOSAICO ES - KOMPSAT 3-3A - 2019-2020')
+    # wms_url = 'https://ide.geobases.es.gov.br/geoserver/ows?service=wms&version=1.3.0&request=GetCapabilities'
+    # wms_layer = prep.load_wms_layer(wms_url, 'IJSN - ORTOFOTOMOSAICO ES - KOMPSAT 3-3A - 2019-2020')
+
+    # # 2. Extrair metadados
+    # if wms_layer:
+    #     metadata = prep.extract_layer_metadata(wms_layer)
+    #     metadata_path = os.path.join(prep.metadata_dir, 'wms_metadata.json')
+    #     with open(metadata_path, 'w') as f:
+    #         json.dump(metadata, f, indent=2)
+
+    wfs_url = 'https://ide.geobases.es.gov.br/geoserver/ows?service=wfs&version=1.1.0&request=GetCapabilities'
+    wfs_layer = prep.load_wfs_layer(wfs_url, 'IJSN - MAPEAMENTO USO DO SOLO ES - 2019-2020')
 
     # 2. Extrair metadados
-    if wms_layer:
-        metadata = prep.extract_layer_metadata(wms_layer)
-        metadata_path = os.path.join(prep.metadata_dir, 'wms_metadata.json')
+    if wfs_layer:
+        metadata = prep.extract_layer_metadata(wfs_layer)
+        metadata_path = os.path.join(prep.metadata_dir, 'wfs_metadata.json')
         with open(metadata_path, 'w') as f:
             json.dump(metadata, f, indent=2)
     
