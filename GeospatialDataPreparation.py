@@ -7,12 +7,28 @@ import rasterio
 from rasterio.features import rasterize
 from rasterio.mask import mask as rio_mask
 from shapely.geometry import mapping, box
-import processing
+
+# import processing
+
+from qgis.core import QgsApplication
+QGIS_PREFIX_PATH = "/usr"
+# Inicializa a aplicação QGIS
+qgs = QgsApplication([], False)
+qgs.setPrefixPath('/usr', True)  # Ajuste de acordo com seu caminho
+qgs.initQgis()
+
+# import processing  # Agora o 'processing' deve ficar disponível
 from qgis.core import (
 QgsProject, QgsVectorLayer, QgsRasterLayer,
 QgsVectorFileWriter, QgsWkbTypes,
-QgsRectangle, QgsFeatureRequest
+QgsRectangle, QgsFeatureRequest, QgsProcessing
 )
+from processing.core.Processing import Processing
+
+# Seu código aqui
+
+
+
 class GeospatialDataPreparation:
     """Classe para preparação de dados geoespaciais"""
 
@@ -457,6 +473,8 @@ def main():
     print(f"Imagens: {prep.images_dir}")
     print(f"Máscaras: {prep.masks_dir}")
     print(f"Metadados: {prep.metadata_dir}")
+
+    qgs.exitQgis()
 
 if __name__ == '__main__':
     main()
