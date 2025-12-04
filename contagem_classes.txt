@@ -1,0 +1,26 @@
+Afloramento Rochoso (Classe 1): 2.04% - 210407740 pixels
+Área Edificada (Classe 2): 1.02% - 105296565 pixels
+Brejo (Classe 3): 1.26% - 130559788 pixels
+Campo Rupestre/Altitude (Classe 4): 0.03% - 3169025 pixels
+Cultivo Agrícola - Abacaxi (Classe 5): 0.21% - 21663288 pixels
+Cultivo Agrícola - Banana (Classe 6): 1.09% - 113024538 pixels
+Cultivo Agrícola - Café (Classe 7): 15.40% - 1591169800 pixels
+Cultivo Agrícola - Cana-De-Açúcar (Classe 8): 0.52% - 53669257 pixels
+Cultivo Agrícola - Coco-Da-Baía (Classe 9): 0.36% - 36823737 pixels
+Cultivo Agrícola - Mamão (Classe 10): 0.10% - 9942317 pixels
+Cultivo Agrícola - Outros Cultivos Permanentes (Classe 11): 1.47% - 152205414 pixels
+Cultivo Agrícola - Outros Cultivos Temporários (Classe 12): 1.62% - 167651765 pixels
+Extração Mineração (Classe 13): 0.11% - 11433269 pixels
+Macega (Classe 14): 5.68% - 586931612 pixels
+Mangue (Classe 15): 0.05% - 5391391 pixels
+Massa D'Água (Classe 16): 0.98% - 101148918 pixels
+Mata Nativa (Classe 17): 16.26% - 1679772266 pixels
+Mata Nativa em Estágio Inicial de Regeneração (Classe 18): 6.00% - 620258874 pixels
+Outros (Classe 19): 5.17% - 534362037 pixels
+Pastagem (Classe 20): 33.09% - 3418237629 pixels
+Reflorestamento - Eucalipto (Classe 21): 4.40% - 454527734 pixels
+Reflorestamento - Pinus (Classe 22): 0.02% - 2397720 pixels
+Reflorestamento - Seringueira (Classe 23): 0.33% - 34591356 pixels
+Restinga (Classe 24): 0.13% - 13771243 pixels
+Solo Exposto (Classe 25): 2.64% - 272513627 pixels
+Total de pixels: 10330920910

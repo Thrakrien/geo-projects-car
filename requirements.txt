@@ -1,0 +1,14 @@
+torch>=2.0
+torchvision>=0.15
+segmentation-models-pytorch
+opencv-python
+numpy
+Pillow
+tqdm
+albumentations
+matplotlib
+scikit-learn
+scipy
+timmd
+safetensors
+huggingface-hub

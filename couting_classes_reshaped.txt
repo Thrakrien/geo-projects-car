@@ -1,0 +1,15 @@
+Afloramento Rochoso (Classe 1): 2.04% - 210407740 pixels
+Área Edificada (Classe 2): 1.02% - 105296565 pixels
+Brejo (Classe 3): 1.26% - 130559788 pixels
+Campo Rupestre/Altitude (Classe 4): 0.03% - 3169025 pixels
+Áreas de Cultivo (Classe 5): 20.77% - 2146150116 pixels
+Extração Mineração (Classe 6): 0.11% - 11433269 pixels
+Macega (Classe 7): 5.68% - 586931612 pixels
+Mangue (Classe 8): 0.05% - 5391391 pixels
+Massa D'Água (Classe 9): 0.98% - 101148918 pixels
+Mata Nativa (Classe 10): 22.26% - 2300031140 pixels
+Outros (Classe 11): 5.17% - 534362037 pixels
+Solo Exposto (Classe 12): 35.73% - 3690751256 pixels
+Reflorestamento (Classe 13): 4.76% - 491516810 pixels
+Restinga (Classe 14): 0.13% - 13771243 pixels
+Total de pixels: 10330920910
