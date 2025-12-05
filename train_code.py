@@ -5,6 +5,7 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from PIL import Image
 import numpy as np
+import torch.nn.functional as F
 import os
 from tqdm import tqdm
 import matplotlib.pyplot as plt
@@ -115,6 +116,9 @@ class PatchifySegmentationDataset(Dataset):
             image_patch = transforms.ToTensor()(image_patch)
         
         mask_patch = torch.from_numpy(np.array(mask_patch)).long()
+        # Remove canal extra se existir (ex: [H, W, 1] -> [H, W])
+        if mask_patch.ndim == 3 and mask_patch.shape[-1] == 1:
+            mask_patch = mask_patch.squeeze(-1)
         
         return image_patch, mask_patch
 
@@ -125,7 +129,7 @@ class PatchifyInference:
     Classe para fazer inferência em imagens grandes usando patches
     e reconstruir a imagem completa
     """
-    def __init__(self, model, device, image_size=1024, patch_size=512, num_classes=25):
+    def __init__(self, model, device, image_size=1024, patch_size=512, num_classes=14):
         self.model = model
         self.device = device
         self.image_size = image_size
@@ -258,7 +262,8 @@ class ExperimentLogger:
         print(f"📁 Logs salvos em: {self.exp_dir}")
     
     def log_epoch(self, epoch, metrics):
-        """Registra métricas de uma época"""
+        if self.use_wandb:
+            import wandb
         with open(self.metrics_csv, 'a', newline='') as f:
             writer = csv.writer(f)
             writer.writerow([
@@ -277,13 +282,14 @@ class ExperimentLogger:
     
     def log_model(self, model, optimizer, epoch, metrics, filename='best_model.pth'):
         """Salva checkpoint do modelo"""
+        if self.use_wandb:
+            import wandb
         checkpoint_path = os.path.join(self.exp_dir, filename)
         torch.save({
             'epoch': epoch,
             'model_state_dict': model.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
             'metrics': metrics,
-            'config': self.config
         }, checkpoint_path)
         
         if self.use_wandb:
@@ -297,7 +303,8 @@ class ExperimentLogger:
         if self.use_wandb:
             wandb.log({name: wandb.Image(fig_path)})
     
-    def log_patch_comparison(self, original_img, patches, reconstructed, epoch):
+        if self.use_wandb:
+            import wandb
         """
         Visualiza processo de patchify/unpatchify
         """
@@ -305,12 +312,10 @@ class ExperimentLogger:
         
         # Imagem original
         axes[0].imshow(original_img)
-        axes[0].set_title('Original (1024x1024)')
         axes[0].axis('off')
         
         # Mostrar alguns patches
         patch_grid = np.vstack([np.hstack(patches[i:i+2]) for i in range(0, 4, 2)])
-        axes[1].imshow(patch_grid)
         axes[1].set_title('Patches (4x 512x512)')
         axes[1].axis('off')
         
@@ -363,6 +368,32 @@ def calculate_metrics(pred, target, num_classes):
     pixel_acc = (correct / total).item()
     
     return mean_iou, pixel_acc, ious
+
+# ===================== DICE LOSS (F1 MACRO) =====================
+class DiceLoss(torch.nn.Module):
+    def __init__(self, num_classes, weight=None, smooth=1e-6):
+        super(DiceLoss, self).__init__()
+        self.num_classes = num_classes
+        self.weight = weight
+        self.smooth = smooth
+
+    def forward(self, input, target):
+        # input: [B, C, H, W] (logits)
+        # target: [B, H, W] (labels)
+        input = F.softmax(input, dim=1)
+        target_onehot = F.one_hot(target, num_classes=self.num_classes).permute(0, 3, 1, 2).float()
+        dice = []
+        for c in range(self.num_classes):
+            if self.weight is not None:
+                w = self.weight[c]
+            else:
+                w = 1.0
+            intersection = torch.sum(input[:, c] * target_onehot[:, c])
+            union = torch.sum(input[:, c]) + torch.sum(target_onehot[:, c])
+            dice_c = (2. * intersection + self.smooth) / (union + self.smooth)
+            dice.append(w * dice_c)
+        dice = torch.stack(dice)
+        return 1 - dice.mean()
 
 
 # ===================== TREINAMENTO =====================
@@ -437,38 +468,38 @@ def main():
         'val_txt': 'validation.txt',
         'images_dir': '/data/integracar/amostras_car_orotofoto/',
         'masks_dir': '/data/integracar/amostras_car_mask/',  # amostras_car_mask
-        
+
         # Patchify
         'use_patches': True,          # Se True, usa patches de 512x512
         'image_size': 1024,           # Tamanho original da imagem
         'patch_size': 512,            # Tamanho dos patches
-        
+
         # Modelo
         'architecture': 'Unet',
-        'encoder_name': 'resnet34',
+        'encoder_name': 'resnet50',
         'encoder_weights': 'imagenet',
-        'num_classes': 25,
+        'num_classes': 14,
         'activation': None,
-        
+
         # Treinamento
         'batch_size': 10,
         'num_epochs': 50,
         'learning_rate': 0.001,
         'weight_decay': 1e-5,
-        
+
         # Otimizador
         'optimizer': 'Adam',
         'scheduler': 'ReduceLROnPlateau',
         'scheduler_patience': 5,
         'scheduler_factor': 0.5,
-        
+
         # Loss
-        'loss_function': 'CrossEntropyLoss',
-        
+        'loss_function': 'DiceLoss',  # <--- Troque para 'DiceLoss' para usar F1 macro
+
         # Logging
         'experiment_name': 'unet_patchify_segmentation',
         'use_wandb': False,
-        
+
         # Sistema
         'num_workers': 4,
         'seed': 42
@@ -555,7 +586,15 @@ def main():
     print(f"Entrada do modelo: patches de {config['patch_size']}x{config['patch_size']}")
     
     # ========== LOSS E OPTIMIZER ==========
-    criterion = nn.CrossEntropyLoss()
+    # Escolha da função de loss
+    if config.get('loss_function', 'CrossEntropyLoss') == 'DiceLoss':
+        # Peso opcional para classes (exemplo: todas iguais)
+        dice_weight = torch.ones(config['num_classes'])
+        criterion = DiceLoss(num_classes=config['num_classes'], weight=dice_weight)
+        print('Usando DiceLoss (F1 macro)')
+    else:
+        criterion = nn.CrossEntropyLoss()
+        print('Usando CrossEntropyLoss')
     
     optimizer = optim.Adam(
         model.parameters(),
