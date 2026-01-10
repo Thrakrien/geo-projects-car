@@ -1,0 +1,1 @@
+epoch,train_loss,train_iou,train_pixel_acc,val_loss,val_iou,val_pixel_acc,learning_rate

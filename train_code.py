@@ -1,3 +1,5 @@
+import time
+from datetime import timedelta
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -42,12 +44,15 @@ class PatchifySegmentationDataset(Dataset):
         self.transform = transform
         self.use_patches = use_patches
         
+        # Ler os nomes dos arquivos do txt
         with open(txt_file, 'r') as f:
             self.image_names = [line.strip() for line in f.readlines()]
         
+        # Calcular quantos patches por imagem
         self.patches_per_row = image_size // patch_size
         self.patches_per_image = self.patches_per_row ** 2
         
+        # Total de patches no dataset
         if use_patches:
             self.total_patches = len(self.image_names) * self.patches_per_image
         else:
@@ -63,6 +68,7 @@ class PatchifySegmentationDataset(Dataset):
     
     def __getitem__(self, idx):
         if self.use_patches:
+            # Calcular qual imagem e qual patch
             img_idx = idx // self.patches_per_image
             patch_idx = idx % self.patches_per_image
             
@@ -88,11 +94,11 @@ class PatchifySegmentationDataset(Dataset):
             image_patches = patchify(image_np, (self.patch_size, self.patch_size, 3), step=self.patch_size)
             mask_patches = patchify(mask_np, (self.patch_size, self.patch_size), step=self.patch_size)
             
-            # Position patch
+            # Calcular posição do patch
             patch_row = patch_idx // self.patches_per_row
             patch_col = patch_idx % self.patches_per_row
             
-            # Extract path
+            # Extrair o patch específico
             image_patch = image_patches[patch_row, patch_col, 0]
             mask_patch = mask_patches[patch_row, patch_col]
             
@@ -116,9 +122,6 @@ class PatchifySegmentationDataset(Dataset):
             image_patch = transforms.ToTensor()(image_patch)
         
         mask_patch = torch.from_numpy(np.array(mask_patch)).long()
-        # Remove canal extra se existir (ex: [H, W, 1] -> [H, W])
-        if mask_patch.ndim == 3 and mask_patch.shape[-1] == 1:
-            mask_patch = mask_patch.squeeze(-1)
         
         return image_patch, mask_patch
 
@@ -129,7 +132,7 @@ class PatchifyInference:
     Classe para fazer inferência em imagens grandes usando patches
     e reconstruir a imagem completa
     """
-    def __init__(self, model, device, image_size=1024, patch_size=512, num_classes=14):
+    def __init__(self, model, device, image_size=1024, patch_size=512, num_classes=2):
         self.model = model
         self.device = device
         self.image_size = image_size
@@ -262,8 +265,7 @@ class ExperimentLogger:
         print(f"📁 Logs salvos em: {self.exp_dir}")
     
     def log_epoch(self, epoch, metrics):
-        if self.use_wandb:
-            import wandb
+        """Registra métricas de uma época"""
         with open(self.metrics_csv, 'a', newline='') as f:
             writer = csv.writer(f)
             writer.writerow([
@@ -282,14 +284,13 @@ class ExperimentLogger:
     
     def log_model(self, model, optimizer, epoch, metrics, filename='best_model.pth'):
         """Salva checkpoint do modelo"""
-        if self.use_wandb:
-            import wandb
         checkpoint_path = os.path.join(self.exp_dir, filename)
         torch.save({
             'epoch': epoch,
             'model_state_dict': model.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
             'metrics': metrics,
+            'config': self.config
         }, checkpoint_path)
         
         if self.use_wandb:
@@ -303,8 +304,7 @@ class ExperimentLogger:
         if self.use_wandb:
             wandb.log({name: wandb.Image(fig_path)})
     
-        if self.use_wandb:
-            import wandb
+    def log_patch_comparison(self, original_img, patches, reconstructed, epoch):
         """
         Visualiza processo de patchify/unpatchify
         """
@@ -312,10 +312,12 @@ class ExperimentLogger:
         
         # Imagem original
         axes[0].imshow(original_img)
+        axes[0].set_title('Original (1024x1024)')
         axes[0].axis('off')
         
         # Mostrar alguns patches
         patch_grid = np.vstack([np.hstack(patches[i:i+2]) for i in range(0, 4, 2)])
+        axes[1].imshow(patch_grid)
         axes[1].set_title('Patches (4x 512x512)')
         axes[1].axis('off')
         
@@ -423,6 +425,7 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device, num_classes
         mean_iou, pixel_acc, _ = calculate_metrics(pred, masks, num_classes)
         running_iou += mean_iou
         running_pixel_acc += pixel_acc
+
     
     epoch_loss = running_loss / len(dataloader)
     epoch_iou = running_iou / len(dataloader)
@@ -464,42 +467,42 @@ def main():
     # ========== CONFIGURAÇÕES ==========
     config = {
         # Dados
-        'train_txt': 'train.txt',
-        'val_txt': 'validation.txt',
+        'train_txt': 'train_sample.txt',
+        'val_txt': 'validation_sample.txt',
         'images_dir': '/data/integracar/amostras_car_orotofoto/',
-        'masks_dir': '/data/integracar/amostras_car_mask/',  # amostras_car_mask
-
+        'masks_dir': '/data/integracar/amostras_car_mask/',
+        
         # Patchify
         'use_patches': True,          # Se True, usa patches de 512x512
         'image_size': 1024,           # Tamanho original da imagem
         'patch_size': 512,            # Tamanho dos patches
-
+        
         # Modelo
         'architecture': 'Unet',
         'encoder_name': 'resnet50',
         'encoder_weights': 'imagenet',
-        'num_classes': 14,
+        'num_classes': 2,
         'activation': None,
-
+        
         # Treinamento
-        'batch_size': 10,
-        'num_epochs': 50,
+        'batch_size': 5,
+        'num_epochs': 10,
         'learning_rate': 0.001,
         'weight_decay': 1e-5,
-
+        
         # Otimizador
         'optimizer': 'Adam',
         'scheduler': 'ReduceLROnPlateau',
         'scheduler_patience': 5,
         'scheduler_factor': 0.5,
-
+        
         # Loss
-        'loss_function': 'DiceLoss',  # <--- Troque para 'DiceLoss' para usar F1 macro
-
+        'loss_function': 'DiceLoss',
+        
         # Logging
         'experiment_name': 'unet_patchify_segmentation',
         'use_wandb': False,
-
+        
         # Sistema
         'num_workers': 4,
         'seed': 42
@@ -586,7 +589,6 @@ def main():
     print(f"Entrada do modelo: patches de {config['patch_size']}x{config['patch_size']}")
     
     # ========== LOSS E OPTIMIZER ==========
-    # Escolha da função de loss
     if config.get('loss_function', 'CrossEntropyLoss') == 'DiceLoss':
         # Peso opcional para classes (exemplo: todas iguais)
         dice_weight = torch.ones(config['num_classes'])
@@ -804,4 +806,7 @@ def main():
 
 
 if __name__ == "__main__":
+    start_time = time.time()
     main()
+    elapsed = time.time() - start_time
+    print(f"Tempo total de execução: {timedelta(seconds=elapsed)}")
