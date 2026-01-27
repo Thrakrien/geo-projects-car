@@ -25,7 +25,7 @@ class PatchifySegmentationDataset(Dataset):
     Divide imagens 1024x1024 em patches 512x512
     """
     def __init__(self, txt_file, images_dir, masks_dir, 
-                 image_size=1024, patch_size=512, 
+                 image_size=2048, patch_size=512, 
                  transform=None, use_patches=True):
         """
         Args:
@@ -132,7 +132,7 @@ class PatchifyInference:
     Classe para fazer inferência em imagens grandes usando patches
     e reconstruir a imagem completa
     """
-    def __init__(self, model, device, image_size=1024, patch_size=512, num_classes=2):
+    def __init__(self, model, device, image_size=2048, patch_size=512, num_classes=2):
         self.model = model
         self.device = device
         self.image_size = image_size
@@ -312,18 +312,18 @@ class ExperimentLogger:
         
         # Imagem original
         axes[0].imshow(original_img)
-        axes[0].set_title('Original (1024x1024)')
+        axes[0].set_title('Original (2048x2048)')
         axes[0].axis('off')
         
         # Mostrar alguns patches
-        patch_grid = np.vstack([np.hstack(patches[i:i+2]) for i in range(0, 4, 2)])
+        patch_grid = np.vstack([np.hstack(patches[i:i+2]) for i in range(0, 6, 2)])
         axes[1].imshow(patch_grid)
-        axes[1].set_title('Patches (4x 512x512)')
+        axes[1].set_title('Patches (6x 512x512)')
         axes[1].axis('off')
         
         # Imagem reconstruída
         axes[2].imshow(reconstructed)
-        axes[2].set_title('Reconstructed (1024x1024)')
+        axes[2].set_title('Reconstructed (2048x2048)')
         axes[2].axis('off')
         
         plt.tight_layout()
@@ -371,33 +371,6 @@ def calculate_metrics(pred, target, num_classes):
     
     return mean_iou, pixel_acc, ious
 
-# ===================== DICE LOSS (F1 MACRO) =====================
-class DiceLoss(torch.nn.Module):
-    def __init__(self, num_classes, weight=None, smooth=1e-6):
-        super(DiceLoss, self).__init__()
-        self.num_classes = num_classes
-        self.weight = weight
-        self.smooth = smooth
-
-    def forward(self, input, target):
-        # input: [B, C, H, W] (logits)
-        # target: [B, H, W] (labels)
-        input = F.softmax(input, dim=1)
-        target_onehot = F.one_hot(target, num_classes=self.num_classes).permute(0, 3, 1, 2).float()
-        dice = []
-        for c in range(self.num_classes):
-            if self.weight is not None:
-                w = self.weight[c]
-            else:
-                w = 1.0
-            intersection = torch.sum(input[:, c] * target_onehot[:, c])
-            union = torch.sum(input[:, c]) + torch.sum(target_onehot[:, c])
-            dice_c = (2. * intersection + self.smooth) / (union + self.smooth)
-            dice.append(w * dice_c)
-        dice = torch.stack(dice)
-        return 1 - dice.mean()
-
-
 # ===================== TREINAMENTO =====================
 def train_one_epoch(model, dataloader, criterion, optimizer, device, num_classes):
     """Treina o modelo por uma época"""
@@ -414,6 +387,7 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device, num_classes
         optimizer.zero_grad()
         outputs = model(images)
         loss = criterion(outputs, masks)
+        # loss = criterion(outputs, masks.unsqueeze(1).float())
         
         # Backward pass
         loss.backward()
@@ -469,12 +443,12 @@ def main():
         # Dados
         'train_txt': 'train_sample.txt',
         'val_txt': 'validation_sample.txt',
-        'images_dir': '/data/integracar/amostras_car_orotofoto/',
-        'masks_dir': '/data/integracar/amostras_car_mask/',
+        'images_dir': '/data/integracar/satellite_sample_2058/',#'/data/integracar/amostras_car_orotofoto/',
+        'masks_dir': '/data/integracar/amostras_car_mask_2058/',#'/data/integracar/amostras_car_mask/',
         
         # Patchify
         'use_patches': True,          # Se True, usa patches de 512x512
-        'image_size': 1024,           # Tamanho original da imagem
+        'image_size': 2048,           # Tamanho original da imagem
         'patch_size': 512,            # Tamanho dos patches
         
         # Modelo
@@ -485,22 +459,22 @@ def main():
         'activation': None,
         
         # Treinamento
-        'batch_size': 5,
-        'num_epochs': 10,
-        'learning_rate': 0.001,
-        'weight_decay': 1e-5,
+        'batch_size': 8, # 5
+        'num_epochs': 20,
+        'learning_rate': 0.005,       # 0.001, 0,01
+        'weight_decay':  0.0005,   #1e-5,
         
         # Otimizador
-        'optimizer': 'Adam',
+        'optimizer': 'Adam',  #'Adam',
         'scheduler': 'ReduceLROnPlateau',
         'scheduler_patience': 5,
         'scheduler_factor': 0.5,
         
         # Loss
-        'loss_function': 'DiceLoss',
+        # 'loss_function': 'DiceLoss',
         
         # Logging
-        'experiment_name': 'unet_patchify_segmentation',
+        'experiment_name': 'unet-adam-2048-16-512-20-epochs-0005-loss',
         'use_wandb': False,
         
         # Sistema
@@ -589,19 +563,16 @@ def main():
     print(f"Entrada do modelo: patches de {config['patch_size']}x{config['patch_size']}")
     
     # ========== LOSS E OPTIMIZER ==========
-    if config.get('loss_function', 'CrossEntropyLoss') == 'DiceLoss':
-        # Peso opcional para classes (exemplo: todas iguais)
-        dice_weight = torch.ones(config['num_classes'])
-        criterion = DiceLoss(num_classes=config['num_classes'], weight=dice_weight)
-        print('Usando DiceLoss (F1 macro)')
-    else:
-        criterion = nn.CrossEntropyLoss()
-        print('Usando CrossEntropyLoss')
+    criterion = nn.CrossEntropyLoss()
+    # print('Usando CrossEntropyLoss')
+
+    # criterion = smp.losses.DiceLoss('binary', from_logits=True)
     
     optimizer = optim.Adam(
         model.parameters(),
         lr=config['learning_rate'],
         weight_decay=config['weight_decay']
+        # momentum=0.9
     )
     
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
@@ -703,7 +674,7 @@ def main():
         gt_mask = Image.open(os.path.join(config['masks_dir'], img_name))
         
         axes[0].imshow(original)
-        axes[0].set_title('Original (1024x1024)')
+        axes[0].set_title('Original (2048x2048)')
         axes[0].axis('off')
         
         axes[1].imshow(gt_mask, cmap='tab20')
