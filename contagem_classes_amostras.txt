@@ -1,0 +1,3 @@
+sem_vegetacao (Classe 0): 12.26% - 225775176 pixels
+com_vegetacao (Classe 1): 87.74% - 1615745890 pixels
+Total de pixels: 1841521066
