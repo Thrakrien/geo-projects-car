@@ -1,5 +1,5 @@
 geo-car/
-.out
+*.out
 .env
-.pth
-/venv
+*.pth
+/venv 
