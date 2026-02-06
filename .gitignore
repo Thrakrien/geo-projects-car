@@ -2,4 +2,6 @@ geo-car/
 *.out
 .env
 *.pth
-/venv 
+/venv
+*.pyc
+*/experiments
