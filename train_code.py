@@ -25,7 +25,7 @@ class PatchifySegmentationDataset(Dataset):
     Divide imagens 1024x1024 em patches 512x512
     """
     def __init__(self, txt_file, images_dir, masks_dir, 
-                 image_size=2048, patch_size=512, 
+                 image_size=1024, patch_size=512, 
                  transform=None, use_patches=True):
         """
         Args:
@@ -91,8 +91,8 @@ class PatchifySegmentationDataset(Dataset):
             
             # Dividir em patches usando patchify
             # patchify retorna (n_patches_h, n_patches_w, patch_h, patch_w, channels)
-            image_patches = patchify(image_np, (self.patch_size, self.patch_size, 3), step=self.patch_size)
-            mask_patches = patchify(mask_np, (self.patch_size, self.patch_size), step=self.patch_size)
+            image_patches = patchify(image_np, (self.patch_size, self.patch_size, 3), step=512)
+            mask_patches = patchify(mask_np, (self.patch_size, self.patch_size), step=512)
             
             # Calcular posição do patch
             patch_row = patch_idx // self.patches_per_row
@@ -108,6 +108,7 @@ class PatchifySegmentationDataset(Dataset):
             
         else:
             # Usar imagem completa (sem patches)
+            print('utilizando imagem completa')
             img_name = self.image_names[idx]
             img_path = os.path.join(self.images_dir, img_name)
             mask_path = os.path.join(self.masks_dir, img_name)
@@ -132,7 +133,7 @@ class PatchifyInference:
     Classe para fazer inferência em imagens grandes usando patches
     e reconstruir a imagem completa
     """
-    def __init__(self, model, device, image_size=2048, patch_size=512, num_classes=2):
+    def __init__(self, model, device, image_size=1024, patch_size=512, num_classes=1):
         self.model = model
         self.device = device
         self.image_size = image_size
@@ -192,7 +193,11 @@ class PatchifyInference:
                     
                     # Predição
                     output = self.model(patch_tensor)
-                    pred = torch.argmax(output, dim=1).squeeze(0).cpu().numpy()
+                    # pred = torch.argmax(output, dim=1).squeeze(0).cpu().numpy()
+
+                    probs = torch.sigmoid(output)
+                    pred = (probs > 0.5).float()
+                    pred = pred.squeeze(0).squeeze(0).cpu().numpy()
                     
                     # Armazenar predição
                     pred_patches[i, j] = pred
@@ -312,7 +317,7 @@ class ExperimentLogger:
         
         # Imagem original
         axes[0].imshow(original_img)
-        axes[0].set_title('Original (2048x2048)')
+        axes[0].set_title('Original (1024x1024)')
         axes[0].axis('off')
         
         # Mostrar alguns patches
@@ -323,7 +328,7 @@ class ExperimentLogger:
         
         # Imagem reconstruída
         axes[2].imshow(reconstructed)
-        axes[2].set_title('Reconstructed (2048x2048)')
+        axes[2].set_title('Reconstructed (1024x1024)')
         axes[2].axis('off')
         
         plt.tight_layout()
@@ -386,8 +391,8 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device, num_classes
         # Forward pass
         optimizer.zero_grad()
         outputs = model(images)
-        loss = criterion(outputs, masks)
-        # loss = criterion(outputs, masks.unsqueeze(1).float())
+        # loss = criterion(outputs, masks)
+        loss = criterion(outputs, masks.unsqueeze(1).float())
         
         # Backward pass
         loss.backward()
@@ -421,7 +426,8 @@ def validate(model, dataloader, criterion, device, num_classes):
             masks = masks.to(device)
             
             outputs = model(images)
-            loss = criterion(outputs, masks)
+            # loss = criterion(outputs, masks)
+            loss = criterion(outputs, masks.unsqueeze(1).float())
             
             running_loss += loss.item()
             pred = torch.argmax(outputs, dim=1)
@@ -443,29 +449,29 @@ def main():
         # Dados
         'train_txt': 'train_sample.txt',
         'val_txt': 'validation_sample.txt',
-        'images_dir': '/data/integracar/satellite_sample_2058/',#'/data/integracar/amostras_car_orotofoto/',
-        'masks_dir': '/data/integracar/amostras_car_mask_2058/',#'/data/integracar/amostras_car_mask/',
+        'images_dir': '/data/integracar/amostras_car_orotofoto/',#'/data/integracar/satellite_sample_2058/', 
+        'masks_dir': '/data/integracar/amostras_car_mask/',#'/data/integracar/amostras_car_mask_2058/', 
         
         # Patchify
         'use_patches': True,          # Se True, usa patches de 512x512
-        'image_size': 2048,           # Tamanho original da imagem
+        'image_size': 1024,           # Tamanho original da imagem
         'patch_size': 512,            # Tamanho dos patches
         
         # Modelo
         'architecture': 'Unet',
         'encoder_name': 'resnet50',
         'encoder_weights': 'imagenet',
-        'num_classes': 2,
+        'num_classes': 1,
         'activation': None,
         
         # Treinamento
         'batch_size': 8, # 5
         'num_epochs': 20,
-        'learning_rate': 0.005,       # 0.001, 0,01
+        'learning_rate': 0.001,       # 0.001, 0,01
         'weight_decay':  0.0005,   #1e-5,
         
         # Otimizador
-        'optimizer': 'Adam',  #'Adam',
+        'optimizer': 'SGD',  #'Adam',
         'scheduler': 'ReduceLROnPlateau',
         'scheduler_patience': 5,
         'scheduler_factor': 0.5,
@@ -474,7 +480,7 @@ def main():
         # 'loss_function': 'DiceLoss',
         
         # Logging
-        'experiment_name': 'unet-adam-2048-16-512-20-epochs-0005-loss',
+        'experiment_name': 'excluding-jitter-and-using-256-resolution-and-256-step-sigmoid',
         'use_wandb': False,
         
         # Sistema
@@ -503,9 +509,9 @@ def main():
     train_transform = transforms.Compose([
         transforms.RandomHorizontalFlip(p=0.5),
         transforms.RandomVerticalFlip(p=0.5),
-        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
+        # transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2), # testar sem o color jitter/parametros - agressivos
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]) # pensar em rever os pesos, visto que são imagenet based
     ])
     
     val_transform = transforms.Compose([
@@ -563,16 +569,18 @@ def main():
     print(f"Entrada do modelo: patches de {config['patch_size']}x{config['patch_size']}")
     
     # ========== LOSS E OPTIMIZER ==========
-    criterion = nn.CrossEntropyLoss()
+    # criterion = nn.CrossEntropyLoss()
+    # criterion = nn.BCEWithLogitsLoss()
+
     # print('Usando CrossEntropyLoss')
 
-    # criterion = smp.losses.DiceLoss('binary', from_logits=True)
+    criterion = smp.losses.DiceLoss('binary', from_logits=True)
     
-    optimizer = optim.Adam(
+    optimizer = optim.SGD(
         model.parameters(),
         lr=config['learning_rate'],
-        weight_decay=config['weight_decay']
-        # momentum=0.9
+        weight_decay=config['weight_decay'],
+        momentum=0.9
     )
     
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
@@ -674,7 +682,7 @@ def main():
         gt_mask = Image.open(os.path.join(config['masks_dir'], img_name))
         
         axes[0].imshow(original)
-        axes[0].set_title('Original (2048x2048)')
+        axes[0].set_title('Original (1024x1024)')
         axes[0].axis('off')
         
         axes[1].imshow(gt_mask, cmap='tab20')
