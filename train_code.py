@@ -91,8 +91,8 @@ class PatchifySegmentationDataset(Dataset):
             
             # Dividir em patches usando patchify
             # patchify retorna (n_patches_h, n_patches_w, patch_h, patch_w, channels)
-            image_patches = patchify(image_np, (self.patch_size, self.patch_size, 3), step=1)
-            mask_patches = patchify(mask_np, (self.patch_size, self.patch_size), step=1)
+            image_patches = patchify(image_np, (self.patch_size, self.patch_size, 3), step=512)
+            mask_patches = patchify(mask_np, (self.patch_size, self.patch_size), step=512)
             
             # Calcular posição do patch
             patch_row = patch_idx // self.patches_per_row
@@ -108,6 +108,7 @@ class PatchifySegmentationDataset(Dataset):
             
         else:
             # Usar imagem completa (sem patches)
+            print('utilizando imagem completa')
             img_name = self.image_names[idx]
             img_path = os.path.join(self.images_dir, img_name)
             mask_path = os.path.join(self.masks_dir, img_name)
@@ -162,7 +163,7 @@ class PatchifyInference:
         image_np = np.array(image)
         
         # Dividir em patches
-        image_patches = patchify(image_np, (self.patch_size, self.patch_size, 3), step=1)
+        image_patches = patchify(image_np, (self.patch_size, self.patch_size, 3), step=self.patch_size)
         
         # Preparar array para predições
         pred_patches = np.zeros((
@@ -192,7 +193,11 @@ class PatchifyInference:
                     
                     # Predição
                     output = self.model(patch_tensor)
-                    pred = torch.argmax(output, dim=1).squeeze(0).cpu().numpy()
+                    # pred = torch.argmax(output, dim=1).squeeze(0).cpu().numpy()
+
+                    probs = torch.sigmoid(output)
+                    pred = (probs > 0.5).float()
+                    pred = pred.squeeze(0).squeeze(0).cpu().numpy()
                     
                     # Armazenar predição
                     pred_patches[i, j] = pred
@@ -475,7 +480,7 @@ def main():
         # 'loss_function': 'DiceLoss',
         
         # Logging
-        'experiment_name': 'bce-logits-sgd-0.001-step1',
+        'experiment_name': 'excluding-jitter-and-using-256-resolution-and-256-step-sigmoid',
         'use_wandb': False,
         
         # Sistema
@@ -504,9 +509,9 @@ def main():
     train_transform = transforms.Compose([
         transforms.RandomHorizontalFlip(p=0.5),
         transforms.RandomVerticalFlip(p=0.5),
-        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
+        # transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2), # testar sem o color jitter/parametros - agressivos
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]) # pensar em rever os pesos, visto que são imagenet based
     ])
     
     val_transform = transforms.Compose([
@@ -565,10 +570,11 @@ def main():
     
     # ========== LOSS E OPTIMIZER ==========
     # criterion = nn.CrossEntropyLoss()
-    criterion = nn.BCEWithLogitsLoss()
+    # criterion = nn.BCEWithLogitsLoss()
+
     # print('Usando CrossEntropyLoss')
 
-    # criterion = smp.losses.DiceLoss('binary', from_logits=True)
+    criterion = smp.losses.DiceLoss('binary', from_logits=True)
     
     optimizer = optim.SGD(
         model.parameters(),
