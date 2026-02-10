@@ -16,6 +16,8 @@ import json
 import csv
 from datetime import datetime
 from patchify import patchify, unpatchify
+from torchmetrics.functional.segmentation import mean_iou
+from torchmetrics.functional.classification import multiclass_accuracy
 # import wandb  # Opcional: pip install wandb
 
 # ===================== DATASET COM PATCHIFY =====================
@@ -117,10 +119,11 @@ class PatchifySegmentationDataset(Dataset):
             mask_patch = Image.open(mask_path).convert('L')
         
         # Aplicar transformações
-        if self.transform:
-            image_patch = self.transform(image_patch)
-        else:
-            image_patch = transforms.ToTensor()(image_patch)
+        # if self.transform:
+        #     image_patch = self.transform(image_patch)
+        # else:
+        #     image_patch = transforms.ToTensor()(image_patch)
+        image_patch = transforms.ToTensor()(image_patch)
         
         mask_patch = torch.from_numpy(np.array(mask_patch)).long()
         
@@ -133,7 +136,7 @@ class PatchifyInference:
     Classe para fazer inferência em imagens grandes usando patches
     e reconstruir a imagem completa
     """
-    def __init__(self, model, device, image_size=1024, patch_size=512, num_classes=1):
+    def __init__(self, model, device, image_size=1024, patch_size=512, num_classes=2):
         self.model = model
         self.device = device
         self.image_size = image_size
@@ -183,21 +186,24 @@ class PatchifyInference:
                     patch_pil = Image.fromarray(patch.astype('uint8'))
                     
                     # Aplicar transformações
-                    if transform:
-                        patch_tensor = transform(patch_pil)
-                    else:
-                        patch_tensor = transforms.ToTensor()(patch_pil)
+                    # if transform:
+                    #     patch_tensor = transform(patch_pil)
+                    # else:
+                    #     patch_tensor = transforms.ToTensor()(patch_pil)
+
+                    patch_tensor = transforms.ToTensor()(patch_pil)
                     
                     # Adicionar batch dimension
                     patch_tensor = patch_tensor.unsqueeze(0).to(self.device)
                     
                     # Predição
                     output = self.model(patch_tensor)
-                    # pred = torch.argmax(output, dim=1).squeeze(0).cpu().numpy()
+                    pred = torch.argmax(output, dim=1).squeeze(0).cpu().numpy()
 
-                    probs = torch.sigmoid(output)
-                    pred = (probs > 0.5).float()
-                    pred = pred.squeeze(0).squeeze(0).cpu().numpy()
+                    # probs = torch.sigmoid(output)
+                    # pred = (probs > 0.5).float()
+                    # pred = (probs > 0.5).long().squeeze(1)
+                    # pred = pred.squeeze(0).squeeze(0).cpu().numpy()
                     
                     # Armazenar predição
                     pred_patches[i, j] = pred
@@ -255,8 +261,11 @@ class ExperimentLogger:
         self.metrics_csv = os.path.join(self.exp_dir, 'metrics.csv')
         with open(self.metrics_csv, 'w', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow(['epoch', 'train_loss', 'train_iou', 'train_pixel_acc', 
-                            'val_loss', 'val_iou', 'val_pixel_acc', 'learning_rate'])
+            # writer.writerow(['epoch', 'train_loss', 'train_iou', 'train_pixel_acc', 
+            #                 'val_loss', 'val_iou', 'val_pixel_acc', 'learning_rate'])
+
+            writer.writerow(['epoch', 'train_loss', 'train_iou', 
+                            'val_loss', 'val_iou', 'learning_rate'])
         
         # Inicializar Weights & Biases
         if self.use_wandb:
@@ -277,10 +286,10 @@ class ExperimentLogger:
                 epoch,
                 metrics.get('train_loss', ''),
                 metrics.get('train_iou', ''),
-                metrics.get('train_pixel_acc', ''),
+                # metrics.get('train_pixel_acc', ''),
                 metrics.get('val_loss', ''),
                 metrics.get('val_iou', ''),
-                metrics.get('val_pixel_acc', ''),
+                # metrics.get('val_pixel_acc', ''),
                 metrics.get('learning_rate', '')
             ])
         
@@ -323,7 +332,7 @@ class ExperimentLogger:
         # Mostrar alguns patches
         patch_grid = np.vstack([np.hstack(patches[i:i+2]) for i in range(0, 6, 2)])
         axes[1].imshow(patch_grid)
-        axes[1].set_title('Patches (6x 512x512)')
+        axes[1].set_title('Patches (4x 512x512)')
         axes[1].axis('off')
         
         # Imagem reconstruída
@@ -350,31 +359,63 @@ class ExperimentLogger:
 
 # ===================== MÉTRICAS =====================
 def calculate_metrics(pred, target, num_classes):
-    """Calcula IoU e Pixel Accuracy para segmentação"""
-    pred = pred.view(-1)
-    target = target.view(-1)
+    """
+    Calcula IoU e Pixel Accuracy usando TorchMetrics (Otimizado).
     
-    # IoU por classe
-    ious = []
-    for cls in range(num_classes):
-        pred_inds = pred == cls
-        target_inds = target == cls
-        intersection = (pred_inds & target_inds).sum().float()
-        union = (pred_inds | target_inds).sum().float()
-        
-        if union == 0:
-            ious.append(float('nan'))
-        else:
-            ious.append((intersection / union).item())
+    Args:
+        pred: Tensor ou numpy array de predições (B, H, W) ou (B, 1, H, W)
+        target: Tensor ou numpy array de targets (B, H, W)
+        num_classes: Inteiro definindo número total de classes
+    """
+    # Converter numpy arrays para tensors se necessário
+    if isinstance(pred, np.ndarray):
+        pred = torch.from_numpy(pred)
+    if isinstance(target, np.ndarray):
+        target = torch.from_numpy(target)
     
-    mean_iou = np.nanmean(ious)
+    # Garantir que estão no mesmo device
+    if pred.device != target.device:
+        pred = pred.to(target.device)
     
-    # Pixel Accuracy
-    correct = (pred == target).sum().float()
-    total = target.numel()
-    pixel_acc = (correct / total).item()
+    # Remove dimensão extra de canal se existir
+    if pred.ndim == 4 and pred.shape[1] == 1:
+        pred = pred.squeeze(1)
     
-    return mean_iou, pixel_acc, ious
+    # Garante que target também não tem dimensão extra
+    if target.ndim == 4:
+        target = target.squeeze(1)
+    
+    # Garantir tipo correto (long/int para classificação)
+    pred = pred.long()
+    target = target.long()
+    
+    # 1. Calcular IoU
+    iou_per_class = mean_iou(
+        preds=pred, 
+        target=target, 
+        num_classes=num_classes, 
+        per_class=True
+    )
+
+    valid_classes_mask = iou_per_class >= 0
+    if valid_classes_mask.sum() > 0:
+        m_iou = iou_per_class[valid_classes_mask].mean()
+    else:
+        m_iou = torch.tensor(0.0, device=pred.device)
+
+    # 2. Calcular Pixel Accuracy
+    # pixel_acc = multiclass_accuracy(
+    #     preds=pred, 
+    #     target=target, 
+    #     num_classes=num_classes, 
+    #     average='micro'
+    # )
+
+    return (
+        m_iou.item(),
+        # pixel_acc.item(),
+        iou_per_class.tolist()
+    )
 
 # ===================== TREINAMENTO =====================
 def train_one_epoch(model, dataloader, criterion, optimizer, device, num_classes):
@@ -382,7 +423,7 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device, num_classes
     model.train()
     running_loss = 0.0
     running_iou = 0.0
-    running_pixel_acc = 0.0
+    iou_per_class = 0.0
     
     for images, masks in tqdm(dataloader, desc="Training"):
         images = images.to(device)
@@ -391,8 +432,8 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device, num_classes
         # Forward pass
         optimizer.zero_grad()
         outputs = model(images)
-        # loss = criterion(outputs, masks)
-        loss = criterion(outputs, masks.unsqueeze(1).float())
+        loss = criterion(outputs, masks)
+        # loss = criterion(outputs, masks.unsqueeze(1).float())
         
         # Backward pass
         loss.backward()
@@ -401,16 +442,20 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device, num_classes
         # Métricas
         running_loss += loss.item()
         pred = torch.argmax(outputs, dim=1)
-        mean_iou, pixel_acc, _ = calculate_metrics(pred, masks, num_classes)
+        # probs = torch.sigmoid(outputs)
+            ## pred = (probs > 0.5).float()
+        # pred = (probs > 0.5).long().squeeze(1)
+        # pred = pred.squeeze(0).squeeze(0).cpu().numpy()
+        mean_iou, iou_per_class = calculate_metrics(pred, masks, num_classes)
         running_iou += mean_iou
-        running_pixel_acc += pixel_acc
+        # running_pixel_acc += pixel_acc
 
     
     epoch_loss = running_loss / len(dataloader)
     epoch_iou = running_iou / len(dataloader)
-    epoch_pixel_acc = running_pixel_acc / len(dataloader)
+    # epoch_pixel_acc = running_pixel_acc / len(dataloader)
     
-    return epoch_loss, epoch_iou, epoch_pixel_acc
+    return epoch_loss, epoch_iou #, epoch_pixel_acc
 
 
 def validate(model, dataloader, criterion, device, num_classes):
@@ -418,7 +463,8 @@ def validate(model, dataloader, criterion, device, num_classes):
     model.eval()
     running_loss = 0.0
     running_iou = 0.0
-    running_pixel_acc = 0.0
+    # running_pixel_acc = 0.0
+    iou_per_class = 0.0
     
     with torch.no_grad():
         for images, masks in tqdm(dataloader, desc="Validation"):
@@ -426,20 +472,25 @@ def validate(model, dataloader, criterion, device, num_classes):
             masks = masks.to(device)
             
             outputs = model(images)
-            # loss = criterion(outputs, masks)
-            loss = criterion(outputs, masks.unsqueeze(1).float())
+            loss = criterion(outputs, masks)
+            # loss = criterion(outputs, masks.unsqueeze(1).float())
             
             running_loss += loss.item()
             pred = torch.argmax(outputs, dim=1)
-            mean_iou, pixel_acc, _ = calculate_metrics(pred, masks, num_classes)
+            # probs = torch.sigmoid(outputs)
+            ## pred = (probs > 0.5).float()
+            # pred = (probs > 0.5).long().squeeze(1)
+            # pred = pred.squeeze(0).squeeze(0).cpu().numpy()
+            mean_iou, iou_per_class = calculate_metrics(pred, masks, num_classes) 
+            #pixel_acc, _ = calculate_metrics(pred, masks, num_classes)
             running_iou += mean_iou
-            running_pixel_acc += pixel_acc
+            # running_pixel_acc += pixel_acc
     
     epoch_loss = running_loss / len(dataloader)
     epoch_iou = running_iou / len(dataloader)
-    epoch_pixel_acc = running_pixel_acc / len(dataloader)
+    # epoch_pixel_acc = running_pixel_acc / len(dataloader)
     
-    return epoch_loss, epoch_iou, epoch_pixel_acc
+    return epoch_loss, epoch_iou #, epoch_pixel_acc
 
 
 # ===================== FUNÇÃO PRINCIPAL =====================
@@ -447,8 +498,8 @@ def main():
     # ========== CONFIGURAÇÕES ==========
     config = {
         # Dados
-        'train_txt': 'train_sample.txt',
-        'val_txt': 'validation_sample.txt',
+        'train_txt': 'data-segments/train_sample.txt',
+        'val_txt': 'data-segments/validation_sample.txt',
         'images_dir': '/data/integracar/amostras_car_orotofoto/',#'/data/integracar/satellite_sample_2058/', 
         'masks_dir': '/data/integracar/amostras_car_mask/',#'/data/integracar/amostras_car_mask_2058/', 
         
@@ -461,13 +512,13 @@ def main():
         'architecture': 'Unet',
         'encoder_name': 'resnet50',
         'encoder_weights': 'imagenet',
-        'num_classes': 1,
+        'num_classes': 2,
         'activation': None,
         
         # Treinamento
-        'batch_size': 8, # 5
-        'num_epochs': 20,
-        'learning_rate': 0.001,       # 0.001, 0,01
+        'batch_size': 8, # 5 9
+        'num_epochs': 10, # 20
+        'learning_rate': 0.01,       # 0.001, 0,01
         'weight_decay':  0.0005,   #1e-5,
         
         # Otimizador
@@ -480,7 +531,7 @@ def main():
         # 'loss_function': 'DiceLoss',
         
         # Logging
-        'experiment_name': 'excluding-jitter-and-using-256-resolution-and-256-step-sigmoid',
+        'experiment_name': 'reduzindo-o-learning-rate',
         'use_wandb': False,
         
         # Sistema
@@ -569,12 +620,12 @@ def main():
     print(f"Entrada do modelo: patches de {config['patch_size']}x{config['patch_size']}")
     
     # ========== LOSS E OPTIMIZER ==========
-    # criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss(ignore_index=2)
     # criterion = nn.BCEWithLogitsLoss()
 
     # print('Usando CrossEntropyLoss')
 
-    criterion = smp.losses.DiceLoss('binary', from_logits=True)
+    # criterion = smp.losses.DiceLoss('binary', from_logits=True)
     
     optimizer = optim.SGD(
         model.parameters(),
@@ -602,12 +653,19 @@ def main():
         print(f"{'='*60}")
         
         # Treinar
-        train_loss, train_iou, train_pixel_acc = train_one_epoch(
+        # train_loss, train_iou, train_pixel_acc = train_one_epoch(
+        #     model, train_loader, criterion, optimizer, device, config['num_classes']
+        # )
+
+        train_loss, train_iou = train_one_epoch(
             model, train_loader, criterion, optimizer, device, config['num_classes']
         )
-        
         # Validar
-        val_loss, val_iou, val_pixel_acc = validate(
+        # val_loss, val_iou, val_pixel_acc = validate(
+        #     model, val_loader, criterion, device, config['num_classes']
+        # )
+
+        val_loss, val_iou = validate(
             model, val_loader, criterion, device, config['num_classes']
         )
         
@@ -625,16 +683,18 @@ def main():
         metrics = {
             'train_loss': train_loss,
             'train_iou': train_iou,
-            'train_pixel_acc': train_pixel_acc,
+            # 'train_pixel_acc': train_pixel_acc,
             'val_loss': val_loss,
             'val_iou': val_iou,
-            'val_pixel_acc': val_pixel_acc,
+            # 'val_pixel_acc': val_pixel_acc,
             'learning_rate': current_lr
         }
         logger.log_epoch(epoch, metrics)
         
-        print(f"Train Loss: {train_loss:.4f} | Train IoU: {train_iou:.4f} | Train Pixel Acc: {train_pixel_acc:.4f}")
-        print(f"Val Loss: {val_loss:.4f} | Val IoU: {val_iou:.4f} | Val Pixel Acc: {val_pixel_acc:.4f}")
+        # print(f"Train Loss: {train_loss:.4f} | Train IoU: {train_iou:.4f} | Train Pixel Acc: {train_pixel_acc:.4f}")
+        # print(f"Val Loss: {val_loss:.4f} | Val IoU: {val_iou:.4f} | Val Pixel Acc: {val_pixel_acc:.4f}")
+        print(f"Train Loss: {train_loss:.4f} | Train IoU: {train_iou:.4f}")
+        print(f"Val Loss: {val_loss:.4f} | Val IoU: {val_iou:.4f}")
         print(f"Learning Rate: {current_lr:.6f}")
         
         # Salvar melhor modelo

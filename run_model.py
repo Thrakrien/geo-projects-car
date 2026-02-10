@@ -1,4 +1,6 @@
-from src import dataset, experiment_logs
+import sys
+print(sys.executable)
+from src import dataset, experiment_logs, preprocessing
 
 train_dataset = dataset.PatchifySegmentationDataset(
     txt_file="train_sample.txt",

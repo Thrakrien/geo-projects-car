@@ -4,4 +4,4 @@ geo-car/
 *.pth
 /venv
 *.pyc
-*/experiments
+/experiments
