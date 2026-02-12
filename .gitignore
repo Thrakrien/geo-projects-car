@@ -5,3 +5,5 @@ geo-car/
 /venv
 *.pyc
 /experiments
+.vscode/
+*.log
