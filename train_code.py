@@ -11,6 +11,7 @@ import torch.nn.functional as F
 import os
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+from matplotlib.colors import ListedColormap
 import segmentation_models_pytorch as smp
 import json
 import csv
@@ -741,16 +742,18 @@ def main():
         
         # Criar visualização com overlays usando matplotlib
         fig, axes = plt.subplots(1, 2, figsize=(14, 7))
+
+        cmap = ListedColormap(['gray', 'green'])
         
         # Ground Truth Overlay
         axes[0].imshow(original)
-        axes[0].imshow(gt_mask, cmap='tab20', alpha=0.4, interpolation='none')
+        axes[0].imshow(gt_mask, cmap='tab20', alpha=0.9, interpolation='none')
         axes[0].set_title('Input + Ground Truth Overlay', fontsize=12, fontweight='bold')
         axes[0].axis('off')
         
         # Prediction Overlay
         axes[1].imshow(original)
-        axes[1].imshow(pred_mask, cmap='tab20', alpha=0.4, interpolation='none')
+        axes[1].imshow(pred_mask, cmap='tab20', alpha=0.9, interpolation='none')
         axes[1].set_title('Input + Prediction Overlay', fontsize=12, fontweight='bold')
         axes[1].axis('off')
         
