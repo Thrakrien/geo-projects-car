@@ -518,8 +518,8 @@ def main():
         
         # Treinamento
         'batch_size': 8, # 5 9
-        'num_epochs': 10, # 20
-        'learning_rate': 0.01,       # 0.001, 0,01
+        'num_epochs': 20, # 20
+        'learning_rate': 0.001,       # 0.001, 0,01
         'weight_decay':  0.0005,   #1e-5,
         
         # Otimizador
@@ -532,7 +532,7 @@ def main():
         # 'loss_function': 'DiceLoss',
         
         # Logging
-        'experiment_name': 'testando-sobreposicao-das-imagens',
+        'experiment_name': 'retirando-linhas-e-diminuindo-o-learning-rate',
         'use_wandb': False,
         
         # Sistema
@@ -747,13 +747,13 @@ def main():
         
         # Ground Truth Overlay
         axes[0].imshow(original)
-        axes[0].imshow(gt_mask, cmap='tab20', alpha=0.9, interpolation='none')
+        axes[0].imshow(gt_mask, cmap=cmap, alpha=0.6, interpolation='none')
         axes[0].set_title('Input + Ground Truth Overlay', fontsize=12, fontweight='bold')
         axes[0].axis('off')
         
         # Prediction Overlay
         axes[1].imshow(original)
-        axes[1].imshow(pred_mask, cmap='tab20', alpha=0.9, interpolation='none')
+        axes[1].imshow(pred_mask, cmap=cmap, alpha=0.6, interpolation='none')
         axes[1].set_title('Input + Prediction Overlay', fontsize=12, fontweight='bold')
         axes[1].axis('off')
         
