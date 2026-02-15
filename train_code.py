@@ -531,7 +531,7 @@ def main():
         # 'loss_function': 'DiceLoss',
         
         # Logging
-        'experiment_name': 'reduzindo-o-learning-rate',
+        'experiment_name': 'testando-sobreposicao-das-imagens',
         'use_wandb': False,
         
         # Sistema
@@ -725,37 +725,39 @@ def main():
     predictions_dir = os.path.join(logger.exp_dir, 'predictions')
     os.makedirs(predictions_dir, exist_ok=True)
     
-    for img_name in val_images[:3]:  # Testar com 3 imagens
+    for img_name in val_images[:3]:
         img_path = os.path.join(config['images_dir'], img_name)
         
-        print(f"Predizendo: {img_name}")
+        print(f"Predizindo: {img_name}")
         pred_mask = patchify_inference.predict_image(img_path, val_transform)
         
         # Salvar predição
         pred_save_path = os.path.join(predictions_dir, f"pred_{img_name}")
         Image.fromarray(pred_mask.astype('uint8')).save(pred_save_path)
         
-        # Criar visualização
-        fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-        
+        # Carregar imagens
         original = Image.open(img_path)
-        gt_mask = Image.open(os.path.join(config['masks_dir'], img_name))
+        gt_mask = np.array(Image.open(os.path.join(config['masks_dir'], img_name)))
         
+        # Criar visualização com overlays usando matplotlib
+        fig, axes = plt.subplots(1, 2, figsize=(14, 7))
+        
+        # Ground Truth Overlay
         axes[0].imshow(original)
-        axes[0].set_title('Original (1024x1024)')
+        axes[0].imshow(gt_mask, cmap='tab20', alpha=0.4, interpolation='none')
+        axes[0].set_title('Input + Ground Truth Overlay', fontsize=12, fontweight='bold')
         axes[0].axis('off')
         
-        axes[1].imshow(gt_mask, cmap='tab20')
-        axes[1].set_title('Ground Truth')
+        # Prediction Overlay
+        axes[1].imshow(original)
+        axes[1].imshow(pred_mask, cmap='tab20', alpha=0.4, interpolation='none')
+        axes[1].set_title('Input + Prediction Overlay', fontsize=12, fontweight='bold')
         axes[1].axis('off')
         
-        axes[2].imshow(pred_mask, cmap='tab20')
-        axes[2].set_title('Prediction (Unpatchified)')
-        axes[2].axis('off')
-        
         plt.tight_layout()
-        logger.log_figure(fig, f'full_image_prediction_{img_name.split(".")[0]}')
+        logger.log_figure(fig, f'overlay_comparison_{img_name.split(".")[0]}')
         plt.close()
+
     
     # ========== PLOTAR RESULTADOS ==========
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
