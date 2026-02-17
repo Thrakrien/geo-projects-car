@@ -525,14 +525,14 @@ def main():
         # Otimizador
         'optimizer': 'SGD',  #'Adam',
         'scheduler': 'ReduceLROnPlateau',
-        'scheduler_patience': 5,
-        'scheduler_factor': 0.5,
+        'scheduler_patience': 10,
+        'scheduler_factor': 0.1, #
         
         # Loss
         # 'loss_function': 'DiceLoss',
         
         # Logging
-        'experiment_name': 'testando-resolucao-2048-retirando-linhas-com-patches-1024',
+        'experiment_name': 'otmizando-o-scheduler-diminuindo-aumentando-patience',
         'use_wandb': False,
         
         # Sistema
