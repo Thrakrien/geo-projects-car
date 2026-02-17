@@ -28,7 +28,7 @@ class PatchifySegmentationDataset(Dataset):
     Divide imagens 1024x1024 em patches 512x512
     """
     def __init__(self, txt_file, images_dir, masks_dir, 
-                 image_size=1024, patch_size=512, 
+                 image_size=2048, patch_size=1024, 
                  transform=None, use_patches=True):
         """
         Args:
@@ -137,7 +137,7 @@ class PatchifyInference:
     Classe para fazer inferência em imagens grandes usando patches
     e reconstruir a imagem completa
     """
-    def __init__(self, model, device, image_size=1024, patch_size=512, num_classes=2):
+    def __init__(self, model, device, image_size=2048, patch_size=1024, num_classes=2):
         self.model = model
         self.device = device
         self.image_size = image_size
@@ -501,13 +501,13 @@ def main():
         # Dados
         'train_txt': 'data-segments/train_sample.txt',
         'val_txt': 'data-segments/validation_sample.txt',
-        'images_dir': '/data/integracar/amostras_car_orotofoto/',#'/data/integracar/satellite_sample_2058/', 
-        'masks_dir': '/data/integracar/amostras_car_mask/',#'/data/integracar/amostras_car_mask_2058/', 
+        'images_dir': '/data/integracar/satellite_sample_2058/', #'/data/integracar/amostras_car_orotofoto/'
+        'masks_dir': '/data/integracar/amostras_car_mask_2058/', #'/data/integracar/amostras_car_mask/',
         
         # Patchify
         'use_patches': True,          # Se True, usa patches de 512x512
-        'image_size': 1024,           # Tamanho original da imagem
-        'patch_size': 512,            # Tamanho dos patches
+        'image_size': 2048,           # Tamanho original da imagem
+        'patch_size': 1024,            # Tamanho dos patches
         
         # Modelo
         'architecture': 'Unet',
@@ -517,7 +517,7 @@ def main():
         'activation': None,
         
         # Treinamento
-        'batch_size': 8, # 5 9
+        'batch_size': 4, # 5 9
         'num_epochs': 20, # 20
         'learning_rate': 0.001,       # 0.001, 0,01
         'weight_decay':  0.0005,   #1e-5,
@@ -532,7 +532,7 @@ def main():
         # 'loss_function': 'DiceLoss',
         
         # Logging
-        'experiment_name': 'retirando-linhas-e-diminuindo-o-learning-rate',
+        'experiment_name': 'testando-resolucao-2048-retirando-linhas-com-patches-1024',
         'use_wandb': False,
         
         # Sistema
