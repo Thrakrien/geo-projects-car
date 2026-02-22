@@ -9,6 +9,8 @@ albumentations
 matplotlib
 scikit-learn
 scipy
-timmd
+rasterio
+ipykernel
+timm
 safetensors
 huggingface-hub
