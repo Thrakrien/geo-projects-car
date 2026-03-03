@@ -524,12 +524,12 @@ def main():
         
         # Otimizador
         'optimizer': 'SGD',  #'Adam',
-        'scheduler': 'ReduceLROnPlateau',
-        'scheduler_patience': 10,
-        'scheduler_factor': 0.1, #
+        'scheduler': 'MultiStepLR',
+        'milestones': [25, 35, 45],
+        'gamma': 0.1, #
         
         # Loss
-        # 'loss_function': 'DiceLoss',
+        'loss_function': 'CrossEntropyLoss',
         
         # Logging
         'experiment_name': 'otmizando-o-scheduler-diminuindo-aumentando-patience',
@@ -635,11 +635,10 @@ def main():
         momentum=0.9
     )
     
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+    scheduler = optim.lr_scheduler.MultiStepLR(
         optimizer,
-        mode='min',
-        factor=config['scheduler_factor'],
-        patience=config['scheduler_patience'],
+        gamma=config["gamma"],
+        milestones=config["milestones"]
         # verbose=True
     )
     
