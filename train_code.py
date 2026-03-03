@@ -28,7 +28,7 @@ class PatchifySegmentationDataset(Dataset):
     Divide imagens 1024x1024 em patches 512x512
     """
     def __init__(self, txt_file, images_dir, masks_dir, 
-                 image_size=2048, patch_size=1024, 
+                 image_size=2048, patch_size=256, 
                  transform=None, use_patches=True):
         """
         Args:
@@ -137,7 +137,7 @@ class PatchifyInference:
     Classe para fazer inferência em imagens grandes usando patches
     e reconstruir a imagem completa
     """
-    def __init__(self, model, device, image_size=2048, patch_size=1024, num_classes=2):
+    def __init__(self, model, device, image_size=2048, patch_size=256, num_classes=2):
         self.model = model
         self.device = device
         self.image_size = image_size
@@ -507,7 +507,7 @@ def main():
         # Patchify
         'use_patches': True,          # Se True, usa patches de 512x512
         'image_size': 2048,           # Tamanho original da imagem
-        'patch_size': 1024,            # Tamanho dos patches
+        'patch_size': 256,            # Tamanho dos patches
         
         # Modelo
         'architecture': 'Unet',
@@ -517,9 +517,9 @@ def main():
         'activation': None,
         
         # Treinamento
-        'batch_size': 4, # 5 9
+        'batch_size': 8, # 5 9
         'num_epochs': 20, # 20
-        'learning_rate': 0.001,       # 0.001, 0,01
+        'learning_rate': 0.01,       # 0.001, 0,01
         'weight_decay':  0.0005,   #1e-5,
         
         # Otimizador
