@@ -21,6 +21,60 @@ from torchmetrics.functional.segmentation import mean_iou
 from torchmetrics.functional.classification import multiclass_accuracy
 # import wandb  # Opcional: pip install wandb
 
+
+def compute_class_weights(
+        train_txt,
+        masks_dir,
+        num_classes,
+        ignore_index=2,
+        dev_limit=None,
+        normalize=True,
+        save_csv_path=None,
+        save_npy_path=None):
+
+    with open(train_txt, "r") as f:
+        names = [line.strip() for line in f.readlines()]
+
+    if dev_limit is not None:
+        names = names[:dev_limit]
+
+    counts = np.zeros(num_classes, dtype=np.int64)
+
+    for name in names:
+        mask_path = os.path.join(masks_dir, name)
+        mask = np.array(Image.open(mask_path))  # se já é máscara indexada, não precisa convert('L')
+        mask = mask.astype(np.int64)
+
+        if ignore_index is not None:
+            mask = mask[mask != ignore_index]
+
+        if mask.size == 0:
+            continue
+
+        binc = np.bincount(mask.ravel(), minlength=num_classes)
+        counts += binc[:num_classes]
+
+    M = counts.sum()
+    C = num_classes
+
+    denominador = C * counts
+    with np.errstate(divide="ignore", invalid="ignore"):
+        weights = M / denominador.astype(np.float64)
+        weights[np.isinf(weights)] = 0.0
+        weights = np.nan_to_num(weights)
+
+    if normalize and weights.sum() > 0:
+        weights = weights / weights.sum()
+
+    if save_csv_path:
+        df = pd.DataFrame({"count_pixels": counts, "weight": weights})
+        df.to_csv(save_csv_path, sep=";", decimal=",", encoding="utf-8", index=False)
+
+    if save_npy_path:
+        np.save(save_npy_path, weights)
+
+    return weights 
+
 # ===================== DATASET COM PATCHIFY =====================
 class PatchifySegmentationDataset(Dataset):
     """
@@ -94,8 +148,8 @@ class PatchifySegmentationDataset(Dataset):
             
             # Dividir em patches usando patchify
             # patchify retorna (n_patches_h, n_patches_w, patch_h, patch_w, channels)
-            image_patches = patchify(image_np, (self.patch_size, self.patch_size, 3), step=512)
-            mask_patches = patchify(mask_np, (self.patch_size, self.patch_size), step=512)
+            image_patches = patchify(image_np, (self.patch_size, self.patch_size, 3), step=256)
+            mask_patches = patchify(mask_np, (self.patch_size, self.patch_size), step=256)
             
             # Calcular posição do patch
             patch_row = patch_idx // self.patches_per_row
@@ -501,8 +555,8 @@ def main():
         # Dados
         'train_txt': 'data-segments/train_sample.txt',
         'val_txt': 'data-segments/validation_sample.txt',
-        'images_dir': '/data/integracar/satellite_sample_2058/', #'/data/integracar/amostras_car_orotofoto/'
-        'masks_dir': '/data/integracar/amostras_car_mask_2058/', #'/data/integracar/amostras_car_mask/',
+        'images_dir': '/data/integracar/replicate_article/satelite_images/', #'/data/integracar/amostras_car_orotofoto/'
+        'masks_dir': '/data/integracar/replicate_article/masks_replicated/', #'/data/integracar/amostras_car_mask/',
         
         # Patchify
         'use_patches': True,          # Se True, usa patches de 512x512
@@ -532,7 +586,7 @@ def main():
         'loss_function': 'CrossEntropyLoss',
         
         # Logging
-        'experiment_name': 'otmizando-o-scheduler-diminuindo-aumentando-patience',
+        'experiment_name': 'trying-use-class-weights-based',
         'use_wandb': False,
         
         # Sistema
@@ -621,7 +675,24 @@ def main():
     print(f"Entrada do modelo: patches de {config['patch_size']}x{config['patch_size']}")
     
     # ========== LOSS E OPTIMIZER ==========
-    criterion = nn.CrossEntropyLoss(ignore_index=2)
+    # criterion = nn.CrossEntropyLoss(ignore_index=2)
+
+    class_weights = None
+    if config.get("use_class_weights", True):
+        w = compute_class_weights(
+            train_txt=config["train_txt"],
+            masks_dir=config["masks_dir"],
+            num_classes=config["num_classes"],
+            ignore_index=2,
+            dev_limit=config.get("weights_dev_limit", None),
+            normalize=True,
+            # save_csv_path=os.path.join(logger.exp_dir, "loss_weights.csv"),
+            save_npy_path=os.path.join(logger.exp_dir, "loss_weights.npy"),
+        )
+        class_weights = torch.tensor(w, dtype=torch.float32, device=device)
+
+    criterion = nn.CrossEntropyLoss(
+        weight=class_weights, ignore_index=2 if 2 is not None else -100)
     # criterion = nn.BCEWithLogitsLoss()
 
     # print('Usando CrossEntropyLoss')
