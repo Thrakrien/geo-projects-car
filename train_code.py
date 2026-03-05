@@ -675,7 +675,7 @@ def main():
     print(f"Entrada do modelo: patches de {config['patch_size']}x{config['patch_size']}")
     
     # ========== LOSS E OPTIMIZER ==========
-    # criterion = nn.CrossEntropyLoss(ignore_index=2)
+    # criterion = nn.CrossEntropyLoss(ignore_index=2) # para binario 2 e para full 14
 
     class_weights = None
     if config.get("use_class_weights", True):
@@ -683,7 +683,7 @@ def main():
             train_txt=config["train_txt"],
             masks_dir=config["masks_dir"],
             num_classes=config["num_classes"],
-            ignore_index=2,
+            ignore_index=14, # para binario 2 e para full 14
             dev_limit=config.get("weights_dev_limit", None),
             normalize=True,
             # save_csv_path=os.path.join(logger.exp_dir, "loss_weights.csv"),
@@ -692,7 +692,7 @@ def main():
         class_weights = torch.tensor(w, dtype=torch.float32, device=device)
 
     criterion = nn.CrossEntropyLoss(
-        weight=class_weights, ignore_index=2 if 2 is not None else -100)
+        weight=class_weights, ignore_index= 14 if 14 is not None else -100)
     # criterion = nn.BCEWithLogitsLoss()
 
     # print('Usando CrossEntropyLoss')
