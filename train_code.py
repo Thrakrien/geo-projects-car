@@ -191,7 +191,7 @@ class PatchifyInference:
     Classe para fazer inferência em imagens grandes usando patches
     e reconstruir a imagem completa
     """
-    def __init__(self, model, device, image_size=2048, patch_size=256, num_classes=2):
+    def __init__(self, model, device, image_size=2048, patch_size=256, num_classes=14):
         self.model = model
         self.device = device
         self.image_size = image_size
@@ -556,7 +556,7 @@ def main():
         'train_txt': 'data-segments/train_sample.txt',
         'val_txt': 'data-segments/validation_sample.txt',
         'images_dir': '/data/integracar/replicate_article/satelite_images/', #'/data/integracar/amostras_car_orotofoto/'
-        'masks_dir': '/data/integracar/replicate_article/masks_replicated/', #'/data/integracar/amostras_car_mask/',
+        'masks_dir': '/data/integracar/replicate_article/masks_replicated_full/', #'/data/integracar/amostras_car_mask/',
         
         # Patchify
         'use_patches': True,          # Se True, usa patches de 512x512
@@ -567,7 +567,7 @@ def main():
         'architecture': 'Unet',
         'encoder_name': 'efficientnet-b0',
         'encoder_weights': 'imagenet',
-        'num_classes': 2,
+        'num_classes': 14,
         'activation': None,
         
         # Treinamento
