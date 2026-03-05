@@ -565,7 +565,7 @@ def main():
         
         # Modelo
         'architecture': 'Unet',
-        'encoder_name': 'resnet50',
+        'encoder_name': 'efficientnet-b0',
         'encoder_weights': 'imagenet',
         'num_classes': 2,
         'activation': None,
@@ -586,7 +586,7 @@ def main():
         'loss_function': 'CrossEntropyLoss',
         
         # Logging
-        'experiment_name': 'trying-use-class-weights-based',
+        'experiment_name': 'class-weights-based-and-efficentnetb0-encoder',
         'use_wandb': False,
         
         # Sistema
