@@ -586,7 +586,7 @@ def main():
         'loss_function': 'CrossEntropyLoss',
         
         # Logging
-        'experiment_name': 'class-weights-based-and-efficentnetb0-encoder',
+        'experiment_name': 'class-aggregated-and-efficentnetb0-encoder',
         'use_wandb': False,
         
         # Sistema
@@ -813,7 +813,21 @@ def main():
         # Criar visualização com overlays usando matplotlib
         fig, axes = plt.subplots(1, 2, figsize=(14, 7))
 
-        cmap = ListedColormap(['gray', 'green'])
+        # cmap = ListedColormap(['gray', 'green'])
+
+        cmap = ListedColormap([
+            "#A9A9A9",  # 0 Afloramento Rochoso
+            "#DC143C",  # 1 Área Edificada
+            "#32CD32",  # 2 Áreas de Vegetação
+            "#CD853F",  # 3 Campo Rupestre/Altitude
+            "#FFD700",  # 4 Áreas de Cultivo
+            "#800080",  # 5 Extração Mineração
+            "#0000FF",  # 6 Massa D'Água
+            "#006400",  # 7 Mata Nativa
+            "#FF69B4",  # 8 Outros
+            "#8B4513",  # 9 Solo Exposto
+            "#90EE90",  # 10 Reflorestamento
+        ])
         
         # Ground Truth Overlay
         axes[0].imshow(original)
