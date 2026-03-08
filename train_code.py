@@ -191,7 +191,7 @@ class PatchifyInference:
     Classe para fazer inferência em imagens grandes usando patches
     e reconstruir a imagem completa
     """
-    def __init__(self, model, device, image_size=2048, patch_size=256, num_classes=14):
+    def __init__(self, model, device, image_size=2048, patch_size=256, num_classes=5):
         self.model = model
         self.device = device
         self.image_size = image_size
@@ -567,7 +567,7 @@ def main():
         'architecture': 'Unet',
         'encoder_name': 'efficientnet-b0',
         'encoder_weights': 'imagenet',
-        'num_classes': 14,
+        'num_classes': 5,
         'activation': None,
         
         # Treinamento
@@ -586,7 +586,7 @@ def main():
         'loss_function': 'CrossEntropyLoss',
         
         # Logging
-        'experiment_name': 'class-aggregated-and-efficentnetb0-encoder',
+        'experiment_name': 'aggregate-files-by-idaf-suggestion',
         'use_wandb': False,
         
         # Sistema
@@ -683,7 +683,7 @@ def main():
             train_txt=config["train_txt"],
             masks_dir=config["masks_dir"],
             num_classes=config["num_classes"],
-            ignore_index=14, # para binario 2 e para full 14
+            ignore_index=5, # para binario 2 e para full 14
             dev_limit=config.get("weights_dev_limit", None),
             normalize=True,
             # save_csv_path=os.path.join(logger.exp_dir, "loss_weights.csv"),
@@ -692,7 +692,7 @@ def main():
         class_weights = torch.tensor(w, dtype=torch.float32, device=device)
 
     criterion = nn.CrossEntropyLoss(
-        weight=class_weights, ignore_index= 14 if 14 is not None else -100)
+        weight=class_weights, ignore_index= 5 if 5 is not None else -100)
     # criterion = nn.BCEWithLogitsLoss()
 
     # print('Usando CrossEntropyLoss')
@@ -815,18 +815,13 @@ def main():
 
         # cmap = ListedColormap(['gray', 'green'])
 
+
         cmap = ListedColormap([
-            "#A9A9A9",  # 0 Afloramento Rochoso
-            "#DC143C",  # 1 Área Edificada
-            "#32CD32",  # 2 Áreas de Vegetação
-            "#CD853F",  # 3 Campo Rupestre/Altitude
-            "#FFD700",  # 4 Áreas de Cultivo
-            "#800080",  # 5 Extração Mineração
-            "#0000FF",  # 6 Massa D'Água
-            "#006400",  # 7 Mata Nativa
-            "#FF69B4",  # 8 Outros
-            "#8B4513",  # 9 Solo Exposto
-            "#90EE90",  # 10 Reflorestamento
+            "#DC143C",  # 0 Infraestrutura
+            "#FFD700",  # 1 Agropastoril
+            "#006400",  # 2 Vegetação Nativa
+            "#8F9779",  # 3 Macega
+            "#1E90FF"  # 4 Massa D'água
         ])
         
         # Ground Truth Overlay
