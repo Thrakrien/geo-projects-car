@@ -148,8 +148,8 @@ class PatchifySegmentationDataset(Dataset):
             
             # Dividir em patches usando patchify
             # patchify retorna (n_patches_h, n_patches_w, patch_h, patch_w, channels)
-            image_patches = patchify(image_np, (self.patch_size, self.patch_size, 3), step=256)
-            mask_patches = patchify(mask_np, (self.patch_size, self.patch_size), step=256)
+            image_patches = patchify(image_np, (self.patch_size, self.patch_size, 3), step=128)
+            mask_patches = patchify(mask_np, (self.patch_size, self.patch_size), step=128)
             
             # Calcular posição do patch
             patch_row = patch_idx // self.patches_per_row
@@ -221,7 +221,7 @@ class PatchifyInference:
         image_np = np.array(image)
         
         # Dividir em patches
-        image_patches = patchify(image_np, (self.patch_size, self.patch_size, 3), step=self.patch_size)
+        image_patches = patchify(image_np, (self.patch_size, self.patch_size, 3), step=128)
         
         # Preparar array para predições
         pred_patches = np.zeros((
@@ -586,7 +586,7 @@ def main():
         'loss_function': 'CrossEntropyLoss',
         
         # Logging
-        'experiment_name': 'aggregate-files-by-idaf-suggestion',
+        'experiment_name': 'using-step-in-128-by-unpatchify',
         'use_wandb': False,
         
         # Sistema
@@ -892,7 +892,6 @@ def main():
     Validation Patches: {len(val_dataset)}
     
     Durante treinamento:
-    - Divide 1024x1024 em 4 patches 512x512
     - Treina em cada patch individualmente
     
     Durante inferência:
