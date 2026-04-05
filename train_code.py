@@ -83,7 +83,7 @@ class PatchifySegmentationDataset(Dataset):
     """
     def __init__(self, txt_file, images_dir, masks_dir, 
                  image_size=2048, patch_size=512, 
-                 transform=None, use_patches=True):
+                 transform=None, use_patches=True, step=None):
         """
         Args:
             txt_file (string): Caminho para o arquivo .txt com os nomes das imagens
@@ -100,13 +100,25 @@ class PatchifySegmentationDataset(Dataset):
         self.patch_size = patch_size
         self.transform = transform
         self.use_patches = use_patches
+        # CORRECAO CRITICA: stride unico para patchify/unpatchify em treino e inferencia.
+        self.step = patch_size if step is None else step
+        if self.step <= 0:
+            raise ValueError("step must be > 0")
+        if self.patch_size > self.image_size:
+            raise ValueError("patch_size cannot be greater than image_size")
+        if (self.image_size - self.patch_size) % self.step != 0:
+            raise ValueError(
+                f"Inconsistent patch grid: (image_size - patch_size) % step != 0 "
+                f"({self.image_size} - {self.patch_size}) % {self.step} != 0"
+            )
         
         # Ler os nomes dos arquivos do txt
         with open(txt_file, 'r') as f:
             self.image_names = [line.strip() for line in f.readlines()]
         
         # Calcular quantos patches por imagem
-        self.patches_per_row = image_size // patch_size
+        # CORRECAO CRITICA: respeita o stride real (inclusive overlap).
+        self.patches_per_row = ((image_size - patch_size) // self.step) + 1
         self.patches_per_image = self.patches_per_row ** 2
         
         # Total de patches no dataset
@@ -148,8 +160,9 @@ class PatchifySegmentationDataset(Dataset):
             
             # Dividir em patches usando patchify
             # patchify retorna (n_patches_h, n_patches_w, patch_h, patch_w, channels)
-            image_patches = patchify(image_np, (self.patch_size, self.patch_size, 3), step=128)
-            mask_patches = patchify(mask_np, (self.patch_size, self.patch_size), step=128)
+            # CORRECAO CRITICA: usar o mesmo step configurado em todo o pipeline.
+            image_patches = patchify(image_np, (self.patch_size, self.patch_size, 3), step=self.step)
+            mask_patches = patchify(mask_np, (self.patch_size, self.patch_size), step=self.step)
             
             # Calcular posição do patch
             patch_row = patch_idx // self.patches_per_row
@@ -178,7 +191,10 @@ class PatchifySegmentationDataset(Dataset):
         #     image_patch = self.transform(image_patch)
         # else:
         #     image_patch = transforms.ToTensor()(image_patch)
-        image_patch = transforms.ToTensor()(image_patch)
+        if self.transform:
+            image_patch = self.transform(image_patch)
+        else:
+            image_patch = transforms.ToTensor()(image_patch)
         
         mask_patch = torch.from_numpy(np.array(mask_patch)).long()
         
@@ -191,13 +207,22 @@ class PatchifyInference:
     Classe para fazer inferência em imagens grandes usando patches
     e reconstruir a imagem completa
     """
-    def __init__(self, model, device, image_size=2048, patch_size=512, num_classes=5):
+    def __init__(self, model, device, image_size=2048, patch_size=512, num_classes=5, step=None):
         self.model = model
         self.device = device
         self.image_size = image_size
         self.patch_size = patch_size
         self.num_classes = num_classes
-        self.patches_per_row = image_size // patch_size
+        # CORRECAO CRITICA: mesmo stride do treino para nao quebrar ordem espacial.
+        self.step = patch_size if step is None else step
+        if self.step <= 0:
+            raise ValueError("step must be > 0")
+        if (self.image_size - self.patch_size) % self.step != 0:
+            raise ValueError(
+                f"Inconsistent patch grid: (image_size - patch_size) % step != 0 "
+                f"({self.image_size} - {self.patch_size}) % {self.step} != 0"
+            )
+        self.patches_per_row = ((image_size - patch_size) // self.step) + 1
         
     def predict_image(self, image_path, transform=None):
         """
@@ -221,7 +246,8 @@ class PatchifyInference:
         image_np = np.array(image)
         
         # Dividir em patches
-        image_patches = patchify(image_np, (self.patch_size, self.patch_size, 3), step=128)
+        # CORRECAO CRITICA: usar step unificado com o dataset.
+        image_patches = patchify(image_np, (self.patch_size, self.patch_size, 3), step=self.step)
         
         # Preparar array para predições
         pred_patches = np.zeros((
@@ -246,7 +272,10 @@ class PatchifyInference:
                     # else:
                     #     patch_tensor = transforms.ToTensor()(patch_pil)
 
-                    patch_tensor = transforms.ToTensor()(patch_pil)
+                    if transform:
+                        patch_tensor = transform(patch_pil)
+                    else:
+                        patch_tensor = transforms.ToTensor()(patch_pil)
                     
                     # Adicionar batch dimension
                     patch_tensor = patch_tensor.unsqueeze(0).to(self.device)
@@ -562,6 +591,7 @@ def main():
         'use_patches': True,          # Se True, usa patches de 512x512
         'image_size': 2048,           # Tamanho original da imagem
         'patch_size': 512,            # Tamanho dos patches
+        'patch_step': 512,            # CORRECAO CRITICA: stride explicito e consistente.
         
         # Modelo
         'architecture': 'DeepLabV3',
@@ -613,9 +643,7 @@ def main():
     # ========== TRANSFORMAÇÕES ==========
     # As transformações agora são aplicadas nos patches de 512x512
     train_transform = transforms.Compose([
-        transforms.RandomHorizontalFlip(p=0.5),
-        transforms.RandomVerticalFlip(p=0.5),
-        # transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2), # testar sem o color jitter/parametros - agressivos
+        # CORRECAO: evitar flips nao pareados (imagem x mascara).
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]) # pensar em rever os pesos, visto que são imagenet based
     ])
@@ -633,7 +661,8 @@ def main():
         image_size=config['image_size'],
         patch_size=config['patch_size'],
         transform=train_transform,
-        use_patches=config['use_patches']
+        use_patches=config['use_patches'],
+        step=config['patch_step']
     )
     
     val_dataset = PatchifySegmentationDataset(
@@ -643,7 +672,8 @@ def main():
         image_size=config['image_size'],
         patch_size=config['patch_size'],
         transform=val_transform,
-        use_patches=config['use_patches']
+        use_patches=config['use_patches'],
+        step=config['patch_step']
     )
     
     train_loader = DataLoader(
@@ -668,7 +698,8 @@ def main():
         encoder_weights=config['encoder_weights'],
         in_channels=3,
         classes=config['num_classes'],
-        activation=config['activation']
+        # CORRECAO CRITICA: CrossEntropyLoss requer logits crus na saida do modelo.
+        activation=None
     ).to(device)
     
     print(f"Modelo: {config['architecture']} com encoder {config['encoder_name']}")
@@ -692,7 +723,8 @@ def main():
         class_weights = torch.tensor(w, dtype=torch.float32, device=device)
 
     criterion = nn.CrossEntropyLoss(
-        weight=class_weights, ignore_index= 5 if 5 is not None else -100)
+        # CORRECAO: evita expressao constante ambigua e warning de sintaxe.
+        weight=class_weights, ignore_index=5)
     # criterion = nn.BCEWithLogitsLoss()
 
     # print('Usando CrossEntropyLoss')
@@ -785,7 +817,8 @@ def main():
         device=device,
         image_size=config['image_size'],
         patch_size=config['patch_size'],
-        num_classes=config['num_classes']
+        num_classes=config['num_classes'],
+        step=config['patch_step']
     )
     
     # Ler lista de imagens de validação
@@ -807,8 +840,14 @@ def main():
         Image.fromarray(pred_mask.astype('uint8')).save(pred_save_path)
         
         # Carregar imagens
-        original = Image.open(img_path)
-        gt_mask = np.array(Image.open(os.path.join(config['masks_dir'], img_name)))
+        original = Image.open(img_path).convert('RGB')
+        gt_mask_pil = Image.open(os.path.join(config['masks_dir'], img_name))
+        # CORRECAO: alinhar tamanhos para evitar overlay visualmente "bonito" mas deslocado.
+        if original.size != (config['image_size'], config['image_size']):
+            original = original.resize((config['image_size'], config['image_size']), Image.BILINEAR)
+        if gt_mask_pil.size != (config['image_size'], config['image_size']):
+            gt_mask_pil = gt_mask_pil.resize((config['image_size'], config['image_size']), Image.NEAREST)
+        gt_mask = np.array(gt_mask_pil)
         
         # Criar visualização com overlays usando matplotlib
         fig, axes = plt.subplots(1, 2, figsize=(14, 7))
@@ -886,7 +925,8 @@ def main():
     
     Original Image: {config['image_size']}x{config['image_size']}
     Patch Size: {config['patch_size']}x{config['patch_size']}
-    Patches per Image: {(config['image_size']//config['patch_size'])**2}
+    Patch Step: {config['patch_step']}
+    Patches per Image: {(((config['image_size'] - config['patch_size']) // config['patch_step']) + 1) ** 2}
     
     Training Patches: {len(train_dataset)}
     Validation Patches: {len(val_dataset)}
@@ -914,7 +954,7 @@ def main():
         'final_val_iou': val_ious[-1],
         'total_epochs': config['num_epochs'],
         'patchify_enabled': config['use_patches'],
-        'patches_per_image': (config['image_size']//config['patch_size'])**2,
+        'patches_per_image': (((config['image_size'] - config['patch_size']) // config['patch_step']) + 1) ** 2,
         'config': config
     }
     logger.save_summary(summary)
