@@ -616,7 +616,7 @@ def main():
         'loss_function': 'CrossEntropyLoss',
         
         # Logging
-        'experiment_name': 'first-try-deep-labv3-512',
+        'experiment_name': 'fixing-window-patchify-deep-labv3-512',
         'use_wandb': False,
         
         # Sistema
