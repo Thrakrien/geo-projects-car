@@ -297,15 +297,110 @@ class PatchifyInference:
         reconstructed = unpatchify(pred_patches, (self.image_size, self.image_size))
         
         return reconstructed
+
+    @staticmethod
+    def _compute_window_positions(length, window_size, stride):
+        """
+        Gera posicoes de inicio da janela garantindo cobertura completa,
+        inclusive na borda final quando stride nao divide exatamente.
+        """
+        if window_size > length:
+            raise ValueError(f"window_size ({window_size}) cannot be greater than image dimension ({length})")
+        if stride <= 0:
+            raise ValueError("stride must be > 0")
+
+        positions = list(range(0, length - window_size + 1, stride))
+        last_start = length - window_size
+        if not positions or positions[-1] != last_start:
+            positions.append(last_start)
+        return positions
+
+    def predict_image_sliding_window(
+        self,
+        image_path,
+        transform=None,
+        window_size=None,
+        stride=None,
+        return_prob_map=False
+    ):
+        """
+        Inferencia por sliding window com agregacao por media de logits.
+        Isso torna a reconstrucao robusta quando ha overlap entre janelas.
+        """
+        window_size = self.patch_size if window_size is None else window_size
+        stride = self.step if stride is None else stride
+
+        if window_size <= 0:
+            raise ValueError("window_size must be > 0")
+        if stride <= 0:
+            raise ValueError("stride must be > 0")
+
+        image = Image.open(image_path).convert('RGB')
+        if image.size != (self.image_size, self.image_size):
+            image = image.resize((self.image_size, self.image_size), Image.BILINEAR)
+
+        image_np = np.array(image)
+        height, width = image_np.shape[:2]
+
+        ys = self._compute_window_positions(height, window_size, stride)
+        xs = self._compute_window_positions(width, window_size, stride)
+
+        # Acumula logits e quantidade de contribuicoes por pixel.
+        logits_acc = np.zeros((self.num_classes, height, width), dtype=np.float32)
+        count_acc = np.zeros((height, width), dtype=np.float32)
+
+        self.model.eval()
+        with torch.no_grad():
+            for y in ys:
+                for x in xs:
+                    patch = image_np[y:y + window_size, x:x + window_size]
+                    patch_pil = Image.fromarray(patch.astype('uint8'))
+
+                    if transform:
+                        patch_tensor = transform(patch_pil)
+                    else:
+                        patch_tensor = transforms.ToTensor()(patch_pil)
+
+                    patch_tensor = patch_tensor.unsqueeze(0).to(self.device)
+                    patch_logits = self.model(patch_tensor).squeeze(0).detach().cpu().float().numpy()
+
+                    logits_acc[:, y:y + window_size, x:x + window_size] += patch_logits
+                    count_acc[y:y + window_size, x:x + window_size] += 1.0
+
+        # Evita divisao por zero e faz media dos logits nas regioes sobrepostas.
+        count_acc = np.clip(count_acc, 1e-6, None)
+        mean_logits = logits_acc / count_acc[None, :, :]
+        prediction = np.argmax(mean_logits, axis=0).astype(np.uint8)
+
+        if return_prob_map:
+            prob_map = torch.softmax(torch.from_numpy(mean_logits), dim=0).numpy()
+            return prediction, prob_map
+        return prediction
     
-    def predict_batch(self, image_paths, transform=None, save_dir=None):
+    def predict_batch(
+        self,
+        image_paths,
+        transform=None,
+        save_dir=None,
+        use_sliding_window=False,
+        window_size=None,
+        stride=None
+    ):
         """
         Faz predição em múltiplas imagens
         """
         predictions = []
         
         for img_path in tqdm(image_paths, desc="Predicting images"):
-            pred = self.predict_image(img_path, transform)
+            if use_sliding_window:
+                pred = self.predict_image_sliding_window(
+                    img_path,
+                    transform=transform,
+                    window_size=window_size,
+                    stride=stride
+                )
+            else:
+                pred = self.predict_image(img_path, transform)
             predictions.append(pred)
             
             # Salvar se necessário
@@ -594,7 +689,7 @@ def main():
         'patch_step': 512,            # CORRECAO CRITICA: stride explicito e consistente.
         
         # Modelo
-        'architecture': 'DeepLabV3',
+        'architecture': 'Unet',
         'encoder_name': 'efficientnet-b5',
         'encoder_weights': 'imagenet',
         'num_classes': 5,
@@ -616,7 +711,7 @@ def main():
         'loss_function': 'CrossEntropyLoss',
         
         # Logging
-        'experiment_name': 'fixing-window-patchify-deep-labv3-512',
+        'experiment_name': 'fixing-window-patchify-unet-sliding-window',
         'use_wandb': False,
         
         # Sistema
@@ -833,7 +928,12 @@ def main():
         img_path = os.path.join(config['images_dir'], img_name)
         
         print(f"Predizindo: {img_name}")
-        pred_mask = patchify_inference.predict_image(img_path, val_transform)
+        pred_mask = patchify_inference.predict_image_sliding_window(
+            img_path,
+            transform=val_transform,
+            window_size=config['patch_size'],
+            stride=config['patch_step']
+        )
         
         # Salvar predição
         pred_save_path = os.path.join(predictions_dir, f"pred_{img_name}")
