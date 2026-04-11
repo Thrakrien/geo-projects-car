@@ -10,8 +10,6 @@ class PreProcessingImage:
     def transformations(self):
         if self.transform_type == "train":
             transformed_data = transforms.Compose([
-                transforms.RandomHorizontalFlip(p=0.5),
-                transforms.RandomVerticalFlip(p=0.5),
                 transforms.ToTensor(),
                 transforms.Normalize(
                     mean=[0.485, 0.456, 0.406],

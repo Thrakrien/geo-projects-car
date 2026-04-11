@@ -3,7 +3,6 @@ from datetime import timedelta
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from PIL import Image
 import numpy as np
@@ -16,7 +15,8 @@ import segmentation_models_pytorch as smp
 import json
 import csv
 from datetime import datetime
-from patchify import patchify, unpatchify
+from src.dataset import create_segmentation_dataloaders
+from src.inference import PatchifyInference
 from torchmetrics.functional.segmentation import mean_iou
 from torchmetrics.functional.classification import multiclass_accuracy
 # import wandb  # Opcional: pip install wandb
@@ -74,344 +74,6 @@ def compute_class_weights(
         np.save(save_npy_path, weights)
 
     return weights 
-
-# ===================== DATASET COM PATCHIFY =====================
-class PatchifySegmentationDataset(Dataset):
-    """
-    Dataset para segmentação semântica com suporte a patchify
-    Divide imagens 1024x1024 em patches 512x512
-    """
-    def __init__(self, txt_file, images_dir, masks_dir, 
-                 image_size=2048, patch_size=512, 
-                 transform=None, use_patches=True, step=None):
-        """
-        Args:
-            txt_file (string): Caminho para o arquivo .txt com os nomes das imagens
-            images_dir (string): Diretório com as imagens de entrada
-            masks_dir (string): Diretório com as máscaras/labels
-            image_size (int): Tamanho da imagem original (1024)
-            patch_size (int): Tamanho dos patches (512)
-            transform: Transformações para as imagens
-            use_patches (bool): Se True, divide em patches. Se False, usa imagem completa
-        """
-        self.images_dir = images_dir
-        self.masks_dir = masks_dir
-        self.image_size = image_size
-        self.patch_size = patch_size
-        self.transform = transform
-        self.use_patches = use_patches
-        # CORRECAO CRITICA: stride unico para patchify/unpatchify em treino e inferencia.
-        self.step = patch_size if step is None else step
-        if self.step <= 0:
-            raise ValueError("step must be > 0")
-        if self.patch_size > self.image_size:
-            raise ValueError("patch_size cannot be greater than image_size")
-        if (self.image_size - self.patch_size) % self.step != 0:
-            raise ValueError(
-                f"Inconsistent patch grid: (image_size - patch_size) % step != 0 "
-                f"({self.image_size} - {self.patch_size}) % {self.step} != 0"
-            )
-        
-        # Ler os nomes dos arquivos do txt
-        with open(txt_file, 'r') as f:
-            self.image_names = [line.strip() for line in f.readlines()]
-        
-        # Calcular quantos patches por imagem
-        # CORRECAO CRITICA: respeita o stride real (inclusive overlap).
-        self.patches_per_row = ((image_size - patch_size) // self.step) + 1
-        self.patches_per_image = self.patches_per_row ** 2
-        
-        # Total de patches no dataset
-        if use_patches:
-            self.total_patches = len(self.image_names) * self.patches_per_image
-        else:
-            self.total_patches = len(self.image_names)
-        
-        print(f"Dataset: {len(self.image_names)} imagens")
-        if use_patches:
-            print(f"Patches por imagem: {self.patches_per_image} ({self.patches_per_row}x{self.patches_per_row})")
-            print(f"Total de patches: {self.total_patches}")
-    
-    def __len__(self):
-        return self.total_patches
-    
-    def __getitem__(self, idx):
-        if self.use_patches:
-            # Calcular qual imagem e qual patch
-            img_idx = idx // self.patches_per_image
-            patch_idx = idx % self.patches_per_image
-            
-            # Carregar imagem completa
-            img_name = self.image_names[img_idx]
-            img_path = os.path.join(self.images_dir, img_name)
-            mask_path = os.path.join(self.masks_dir, img_name)
-            
-            image = Image.open(img_path).convert('RGB')
-            mask = Image.open(mask_path).convert('L')
-            
-            # Redimensionar para tamanho esperado se necessário
-            if image.size != (self.image_size, self.image_size):
-                image = image.resize((self.image_size, self.image_size), Image.BILINEAR)
-                mask = mask.resize((self.image_size, self.image_size), Image.NEAREST)
-            
-            # Converter para numpy
-            image_np = np.array(image)
-            mask_np = np.array(mask)
-            
-            # Dividir em patches usando patchify
-            # patchify retorna (n_patches_h, n_patches_w, patch_h, patch_w, channels)
-            # CORRECAO CRITICA: usar o mesmo step configurado em todo o pipeline.
-            image_patches = patchify(image_np, (self.patch_size, self.patch_size, 3), step=self.step)
-            mask_patches = patchify(mask_np, (self.patch_size, self.patch_size), step=self.step)
-            
-            # Calcular posição do patch
-            patch_row = patch_idx // self.patches_per_row
-            patch_col = patch_idx % self.patches_per_row
-            
-            # Extrair o patch específico
-            image_patch = image_patches[patch_row, patch_col, 0]
-            mask_patch = mask_patches[patch_row, patch_col]
-            
-            # Converter de volta para PIL para aplicar transforms
-            image_patch = Image.fromarray(image_patch.astype('uint8'))
-            mask_patch = Image.fromarray(mask_patch.astype('uint8'))
-            
-        else:
-            # Usar imagem completa (sem patches)
-            print('utilizando imagem completa')
-            img_name = self.image_names[idx]
-            img_path = os.path.join(self.images_dir, img_name)
-            mask_path = os.path.join(self.masks_dir, img_name)
-            
-            image_patch = Image.open(img_path).convert('RGB')
-            mask_patch = Image.open(mask_path).convert('L')
-        
-        # Aplicar transformações
-        # if self.transform:
-        #     image_patch = self.transform(image_patch)
-        # else:
-        #     image_patch = transforms.ToTensor()(image_patch)
-        if self.transform:
-            image_patch = self.transform(image_patch)
-        else:
-            image_patch = transforms.ToTensor()(image_patch)
-        
-        mask_patch = torch.from_numpy(np.array(mask_patch)).long()
-        
-        return image_patch, mask_patch
-
-
-# ===================== INFERÊNCIA COM PATCHIFY =====================
-class PatchifyInference:
-    """
-    Classe para fazer inferência em imagens grandes usando patches
-    e reconstruir a imagem completa
-    """
-    def __init__(self, model, device, image_size=2048, patch_size=512, num_classes=5, step=None):
-        self.model = model
-        self.device = device
-        self.image_size = image_size
-        self.patch_size = patch_size
-        self.num_classes = num_classes
-        # CORRECAO CRITICA: mesmo stride do treino para nao quebrar ordem espacial.
-        self.step = patch_size if step is None else step
-        if self.step <= 0:
-            raise ValueError("step must be > 0")
-        if (self.image_size - self.patch_size) % self.step != 0:
-            raise ValueError(
-                f"Inconsistent patch grid: (image_size - patch_size) % step != 0 "
-                f"({self.image_size} - {self.patch_size}) % {self.step} != 0"
-            )
-        self.patches_per_row = ((image_size - patch_size) // self.step) + 1
-        
-    def predict_image(self, image_path, transform=None):
-        """
-        Faz predição em uma imagem completa usando patches
-        
-        Args:
-            image_path: Caminho da imagem
-            transform: Transformações para aplicar nos patches
-            
-        Returns:
-            prediction: Máscara predita (numpy array)
-            probability_map: Mapa de probabilidades (opcional)
-        """
-        # Carregar imagem
-        image = Image.open(image_path).convert('RGB')
-        
-        # Redimensionar se necessário
-        if image.size != (self.image_size, self.image_size):
-            image = image.resize((self.image_size, self.image_size), Image.BILINEAR)
-        
-        image_np = np.array(image)
-        
-        # Dividir em patches
-        # CORRECAO CRITICA: usar step unificado com o dataset.
-        image_patches = patchify(image_np, (self.patch_size, self.patch_size, 3), step=self.step)
-        
-        # Preparar array para predições
-        pred_patches = np.zeros((
-            self.patches_per_row, 
-            self.patches_per_row, 
-            self.patch_size, 
-            self.patch_size
-        ), dtype=np.uint8)
-        
-        # Predizer cada patch
-        self.model.eval()
-        with torch.no_grad():
-            for i in range(self.patches_per_row):
-                for j in range(self.patches_per_row):
-                    # Extrair patch
-                    patch = image_patches[i, j, 0]
-                    patch_pil = Image.fromarray(patch.astype('uint8'))
-                    
-                    # Aplicar transformações
-                    # if transform:
-                    #     patch_tensor = transform(patch_pil)
-                    # else:
-                    #     patch_tensor = transforms.ToTensor()(patch_pil)
-
-                    if transform:
-                        patch_tensor = transform(patch_pil)
-                    else:
-                        patch_tensor = transforms.ToTensor()(patch_pil)
-                    
-                    # Adicionar batch dimension
-                    patch_tensor = patch_tensor.unsqueeze(0).to(self.device)
-                    
-                    # Predição
-                    output = self.model(patch_tensor)
-                    pred = torch.argmax(output, dim=1).squeeze(0).cpu().numpy()
-
-                    # probs = torch.sigmoid(output)
-                    # pred = (probs > 0.5).float()
-                    # pred = (probs > 0.5).long().squeeze(1)
-                    # pred = pred.squeeze(0).squeeze(0).cpu().numpy()
-                    
-                    # Armazenar predição
-                    pred_patches[i, j] = pred
-        
-        # Reconstruir imagem completa usando unpatchify
-        # unpatchify espera (n_patches_h, n_patches_w, patch_h, patch_w)
-        reconstructed = unpatchify(pred_patches, (self.image_size, self.image_size))
-        
-        return reconstructed
-
-    @staticmethod
-    def _compute_window_positions(length, window_size, stride):
-        """
-        Gera posicoes de inicio da janela garantindo cobertura completa,
-        inclusive na borda final quando stride nao divide exatamente.
-        """
-        if window_size > length:
-            raise ValueError(f"window_size ({window_size}) cannot be greater than image dimension ({length})")
-        if stride <= 0:
-            raise ValueError("stride must be > 0")
-
-        positions = list(range(0, length - window_size + 1, stride))
-        last_start = length - window_size
-        if not positions or positions[-1] != last_start:
-            positions.append(last_start)
-        return positions
-
-    def predict_image_sliding_window(
-        self,
-        image_path,
-        transform=None,
-        window_size=None,
-        stride=None,
-        return_prob_map=False
-    ):
-        """
-        Inferencia por sliding window com agregacao por media de logits.
-        Isso torna a reconstrucao robusta quando ha overlap entre janelas.
-        """
-        window_size = self.patch_size if window_size is None else window_size
-        stride = self.step if stride is None else stride
-
-        if window_size <= 0:
-            raise ValueError("window_size must be > 0")
-        if stride <= 0:
-            raise ValueError("stride must be > 0")
-
-        image = Image.open(image_path).convert('RGB')
-        if image.size != (self.image_size, self.image_size):
-            image = image.resize((self.image_size, self.image_size), Image.BILINEAR)
-
-        image_np = np.array(image)
-        height, width = image_np.shape[:2]
-
-        ys = self._compute_window_positions(height, window_size, stride)
-        xs = self._compute_window_positions(width, window_size, stride)
-
-        # Acumula logits e quantidade de contribuicoes por pixel.
-        logits_acc = np.zeros((self.num_classes, height, width), dtype=np.float32)
-        count_acc = np.zeros((height, width), dtype=np.float32)
-
-        self.model.eval()
-        with torch.no_grad():
-            for y in ys:
-                for x in xs:
-                    patch = image_np[y:y + window_size, x:x + window_size]
-                    patch_pil = Image.fromarray(patch.astype('uint8'))
-
-                    if transform:
-                        patch_tensor = transform(patch_pil)
-                    else:
-                        patch_tensor = transforms.ToTensor()(patch_pil)
-
-                    patch_tensor = patch_tensor.unsqueeze(0).to(self.device)
-                    patch_logits = self.model(patch_tensor).squeeze(0).detach().cpu().float().numpy()
-
-                    logits_acc[:, y:y + window_size, x:x + window_size] += patch_logits
-                    count_acc[y:y + window_size, x:x + window_size] += 1.0
-
-        # Evita divisao por zero e faz media dos logits nas regioes sobrepostas.
-        count_acc = np.clip(count_acc, 1e-6, None)
-        mean_logits = logits_acc / count_acc[None, :, :]
-        prediction = np.argmax(mean_logits, axis=0).astype(np.uint8)
-
-        if return_prob_map:
-            prob_map = torch.softmax(torch.from_numpy(mean_logits), dim=0).numpy()
-            return prediction, prob_map
-        return prediction
-    
-    def predict_batch(
-        self,
-        image_paths,
-        transform=None,
-        save_dir=None,
-        use_sliding_window=False,
-        window_size=None,
-        stride=None
-    ):
-        """
-        Faz predição em múltiplas imagens
-        """
-        predictions = []
-        
-        for img_path in tqdm(image_paths, desc="Predicting images"):
-            if use_sliding_window:
-                pred = self.predict_image_sliding_window(
-                    img_path,
-                    transform=transform,
-                    window_size=window_size,
-                    stride=stride
-                )
-            else:
-                pred = self.predict_image(img_path, transform)
-            predictions.append(pred)
-            
-            # Salvar se necessário
-            if save_dir:
-                os.makedirs(save_dir, exist_ok=True)
-                img_name = os.path.basename(img_path)
-                save_path = os.path.join(save_dir, img_name)
-                Image.fromarray(pred.astype('uint8')).save(save_path)
-        
-        return predictions
-
 
 # ===================== LOGGER DE EXPERIMENTOS =====================
 class ExperimentLogger:
@@ -687,6 +349,7 @@ def main():
         'image_size': 2048,           # Tamanho original da imagem
         'patch_size': 512,            # Tamanho dos patches
         'patch_step': 512,            # CORRECAO CRITICA: stride explicito e consistente.
+        'inference_stride': 256,      # Overlap de 50% para reduzir costuras na inferência.
         
         # Modelo
         'architecture': 'Unet',
@@ -749,42 +412,12 @@ def main():
     ])
     
     # ========== DATASETS E DATALOADERS ==========
-    train_dataset = PatchifySegmentationDataset(
-        txt_file=config['train_txt'],
-        images_dir=config['images_dir'],
-        masks_dir=config['masks_dir'],
-        image_size=config['image_size'],
-        patch_size=config['patch_size'],
-        transform=train_transform,
-        use_patches=config['use_patches'],
-        step=config['patch_step']
-    )
-    
-    val_dataset = PatchifySegmentationDataset(
-        txt_file=config['val_txt'],
-        images_dir=config['images_dir'],
-        masks_dir=config['masks_dir'],
-        image_size=config['image_size'],
-        patch_size=config['patch_size'],
-        transform=val_transform,
-        use_patches=config['use_patches'],
-        step=config['patch_step']
-    )
-    
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=config['batch_size'],
-        shuffle=True,
-        num_workers=config['num_workers'],
-        pin_memory=True
-    )
-    
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=config['batch_size'],
-        shuffle=False,
-        num_workers=config['num_workers'],
-        pin_memory=True
+    train_dataset, val_dataset, train_loader, val_loader = (
+        create_segmentation_dataloaders(
+            config=config,
+            train_transform=train_transform,
+            val_transform=val_transform
+        )
     )
     
     # ========== MODELO (Segmentation Models PyTorch) ==========
@@ -903,7 +536,7 @@ def main():
     
     # ========== DEMONSTRAÇÃO DE INFERÊNCIA COM PATCHIFY ==========
     print(f"\n{'='*60}")
-    print("Testando inferência com patchify/unpatchify...")
+    print("Testando inferência com sliding window e overlap...")
     print(f"{'='*60}")
     
     # Criar objeto de inferência
@@ -928,11 +561,11 @@ def main():
         img_path = os.path.join(config['images_dir'], img_name)
         
         print(f"Predizindo: {img_name}")
-        pred_mask = patchify_inference.predict_image_sliding_window(
+        pred_mask = patchify_inference.predict_image(
             img_path,
             transform=val_transform,
             window_size=config['patch_size'],
-            stride=config['patch_step']
+            stride=config['inference_stride']
         )
         
         # Salvar predição
@@ -1025,7 +658,8 @@ def main():
     
     Original Image: {config['image_size']}x{config['image_size']}
     Patch Size: {config['patch_size']}x{config['patch_size']}
-    Patch Step: {config['patch_step']}
+    Train Patch Step: {config['patch_step']}
+    Inference Stride: {config['inference_stride']}
     Patches per Image: {(((config['image_size'] - config['patch_size']) // config['patch_step']) + 1) ** 2}
     
     Training Patches: {len(train_dataset)}
@@ -1035,9 +669,9 @@ def main():
     - Treina em cada patch individualmente
     
     Durante inferência:
-    - Divide imagem em patches
-    - Prediz cada patch
-    - Reconstrói com unpatchify
+    - Usa sliding window com overlap
+    - Prediz cada janela
+    - Agrega logits por média antes do argmax
     """
     axes[1, 1].text(0.1, 0.5, patches_info, fontsize=9, family='monospace')
     axes[1, 1].axis('off')
@@ -1055,6 +689,7 @@ def main():
         'total_epochs': config['num_epochs'],
         'patchify_enabled': config['use_patches'],
         'patches_per_image': (((config['image_size'] - config['patch_size']) // config['patch_step']) + 1) ** 2,
+        'inference_stride': config['inference_stride'],
         'config': config
     }
     logger.save_summary(summary)
