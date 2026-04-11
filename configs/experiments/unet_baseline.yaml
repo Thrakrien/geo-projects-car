@@ -1,0 +1,37 @@
+# Baseline equivalente ao treino atual, com saida em logits crus.
+experiment_name: refactor-unet-sliding-window
+
+train_txt: data-segments/train_sample.txt
+val_txt: data-segments/validation_sample.txt
+images_dir: /data/integracar/replicate_article/satelite_images/
+masks_dir: /data/integracar/replicate_article/masks_replicated_full/
+
+use_patches: true
+image_size: 2048
+patch_size: 512
+patch_step: 512
+inference_overlap: 256
+
+architecture: unet
+encoder_name: efficientnet-b5
+encoder_weights: imagenet
+in_channels: 3
+num_classes: 5
+
+batch_size: 5
+num_epochs: 20
+learning_rate: 0.01
+weight_decay: 0.0005
+
+optimizer: SGD
+scheduler: MultiStepLR
+milestones: [25, 35, 45]
+gamma: 0.1
+
+loss_function: CrossEntropyLoss
+ignore_index: 5
+use_class_weights: true
+
+use_wandb: false
+num_workers: 4
+seed: 42

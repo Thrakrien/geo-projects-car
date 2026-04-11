@@ -1,3 +1,4 @@
+import argparse
 import time
 from datetime import timedelta
 import torch
@@ -11,12 +12,13 @@ import os
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
-import segmentation_models_pytorch as smp
 import json
 import csv
 from datetime import datetime
 from src.dataset import create_segmentation_dataloaders
 from src.inference import PatchifyInference
+from src.models import build_model
+from src.training_config import load_config, model_config
 from torchmetrics.functional.segmentation import mean_iou
 from torchmetrics.functional.classification import multiclass_accuracy
 # import wandb  # Opcional: pip install wandb
@@ -334,53 +336,22 @@ def validate(model, dataloader, criterion, device, num_classes):
     return epoch_loss, epoch_iou #, epoch_pixel_acc
 
 
+def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(description="Train a segmentation model.")
+    parser.add_argument(
+        "--config",
+        default=None,
+        help="Optional YAML or JSON experiment config path."
+    )
+    return parser.parse_args()
+
+
 # ===================== FUNÇÃO PRINCIPAL =====================
-def main():
+def main() -> None:
     # ========== CONFIGURAÇÕES ==========
-    config = {
-        # Dados
-        'train_txt': 'data-segments/train_sample.txt',
-        'val_txt': 'data-segments/validation_sample.txt',
-        'images_dir': '/data/integracar/replicate_article/satelite_images/', #'/data/integracar/amostras_car_orotofoto/'
-        'masks_dir': '/data/integracar/replicate_article/masks_replicated_full/', #'/data/integracar/amostras_car_mask/',
-        
-        # Patchify
-        'use_patches': True,          # Se True, usa patches de 512x512
-        'image_size': 2048,           # Tamanho original da imagem
-        'patch_size': 512,            # Tamanho dos patches
-        'patch_step': 512,            # CORRECAO CRITICA: stride explicito e consistente.
-        'inference_stride': 256,      # Overlap de 50% para reduzir costuras na inferência.
-        
-        # Modelo
-        'architecture': 'Unet',
-        'encoder_name': 'efficientnet-b5',
-        'encoder_weights': 'imagenet',
-        'num_classes': 5,
-        'activation': 'sigmoid',
-        
-        # Treinamento
-        'batch_size': 5, # 5 9
-        'num_epochs': 20, # 20
-        'learning_rate': 0.01,       # 0.001, 0,01
-        'weight_decay':  0.0005,   #1e-5,
-        
-        # Otimizador
-        'optimizer': 'SGD',  #'Adam',
-        'scheduler': 'MultiStepLR',
-        'milestones': [25, 35, 45],
-        'gamma': 0.1, #
-        
-        # Loss
-        'loss_function': 'CrossEntropyLoss',
-        
-        # Logging
-        'experiment_name': 'fixing-window-patchify-unet-sliding-window',
-        'use_wandb': False,
-        
-        # Sistema
-        'num_workers': 4,
-        'seed': 42
-    }
+    args = parse_args()
+    config = load_config(args.config)
     
     # Seed para reprodutibilidade
     torch.manual_seed(config['seed']) # config['seed']
@@ -420,15 +391,8 @@ def main():
         )
     )
     
-    # ========== MODELO (Segmentation Models PyTorch) ==========
-    model = smp.Unet(
-        encoder_name=config['encoder_name'],
-        encoder_weights=config['encoder_weights'],
-        in_channels=3,
-        classes=config['num_classes'],
-        # CORRECAO CRITICA: CrossEntropyLoss requer logits crus na saida do modelo.
-        activation=None
-    ).to(device)
+    # ========== MODELO ==========
+    model = build_model(model_config(config)).to(device)
     
     print(f"Modelo: {config['architecture']} com encoder {config['encoder_name']}")
     print(f"Entrada do modelo: patches de {config['patch_size']}x{config['patch_size']}")
@@ -442,7 +406,7 @@ def main():
             train_txt=config["train_txt"],
             masks_dir=config["masks_dir"],
             num_classes=config["num_classes"],
-            ignore_index=5, # para binario 2 e para full 14
+            ignore_index=config["ignore_index"], # para binario 2 e para full 14
             dev_limit=config.get("weights_dev_limit", None),
             normalize=True,
             # save_csv_path=os.path.join(logger.exp_dir, "loss_weights.csv"),
@@ -452,7 +416,7 @@ def main():
 
     criterion = nn.CrossEntropyLoss(
         # CORRECAO: evita expressao constante ambigua e warning de sintaxe.
-        weight=class_weights, ignore_index=5)
+        weight=class_weights, ignore_index=config["ignore_index"])
     # criterion = nn.BCEWithLogitsLoss()
 
     # print('Usando CrossEntropyLoss')

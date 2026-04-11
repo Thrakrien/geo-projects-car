@@ -9,6 +9,7 @@ albumentations
 matplotlib
 scikit-learn
 scipy
+PyYAML
 timmd
 safetensors
 huggingface-hub
