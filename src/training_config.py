@@ -15,8 +15,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "use_patches": True,
     "image_size": 2048,
     "patch_size": 256,
-    "patch_step": 32,
-    "inference_stride": 32,
+    "patch_step": 128,
+    "inference_stride": 128,
 
     # Modelo
     "architecture": "unet",
@@ -27,7 +27,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
 
     # Treinamento
     "batch_size": 8,
-    "num_epochs": 100,
+    "num_epochs": 25,
     "learning_rate": 0.01,
     "weight_decay": 0.0005,
 
@@ -43,7 +43,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "use_class_weights": True,
 
     # Logging
-    "experiment_name": "replying-unet-icmbio",
+    "experiment_name": "replying-unet-icmbio-less-epochs",
     "use_wandb": False,
 
     # Sistema
