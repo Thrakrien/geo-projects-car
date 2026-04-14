@@ -28,7 +28,7 @@ def compute_class_weights(
         train_txt,
         masks_dir,
         num_classes,
-        ignore_index=2,
+        ignore_index=5,
         dev_limit=None,
         normalize=True,
         save_csv_path=None,
