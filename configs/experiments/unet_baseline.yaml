@@ -1,5 +1,5 @@
 # Baseline equivalente ao treino atual, com saida em logits crus.
-experiment_name: refactor-unet-sliding-window
+experiment_name: replying-unet-icmbio
 
 train_txt: data-segments/train_sample.txt
 val_txt: data-segments/validation_sample.txt
@@ -8,9 +8,9 @@ masks_dir: /data/integracar/replicate_article/masks_replicated_full/
 
 use_patches: true
 image_size: 2048
-patch_size: 512
-patch_step: 512
-inference_overlap: 256
+patch_size: 256
+patch_step: 32
+inference_overlap: 32
 
 architecture: unet
 encoder_name: efficientnet-b5
@@ -18,15 +18,15 @@ encoder_weights: imagenet
 in_channels: 3
 num_classes: 5
 
-batch_size: 5
-num_epochs: 20
+batch_size: 8
+num_epochs: 100
 learning_rate: 0.01
 weight_decay: 0.0005
 
 optimizer: SGD
 scheduler: MultiStepLR
 milestones: [25, 35, 45]
-gamma: 0.1
+gamma: 2.0
 
 loss_function: CrossEntropyLoss
 ignore_index: 5

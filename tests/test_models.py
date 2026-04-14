@@ -7,7 +7,7 @@ from src.models import build_model
 pytest.importorskip("segmentation_models_pytorch")
 
 
-@pytest.mark.parametrize("architecture", ["unet", "deeplabv3plus"])
+@pytest.mark.parametrize("architecture", ["unet", "deeplabv3"])
 def test_build_model_output_shape(architecture):
     """Model factory must keep the train/inference logits contract stable."""
     config = {

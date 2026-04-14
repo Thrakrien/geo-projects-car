@@ -14,9 +14,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # Patchify
     "use_patches": True,
     "image_size": 2048,
-    "patch_size": 512,
-    "patch_step": 512,
-    "inference_stride": 256,
+    "patch_size": 256,
+    "patch_step": 32,
+    "inference_stride": 32,
 
     # Modelo
     "architecture": "unet",
@@ -26,8 +26,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "num_classes": 5,
 
     # Treinamento
-    "batch_size": 5,
-    "num_epochs": 20,
+    "batch_size": 8,
+    "num_epochs": 100,
     "learning_rate": 0.01,
     "weight_decay": 0.0005,
 
@@ -35,7 +35,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "optimizer": "SGD",
     "scheduler": "MultiStepLR",
     "milestones": [25, 35, 45],
-    "gamma": 0.1,
+    "gamma": 2.0,
 
     # Loss
     "loss_function": "CrossEntropyLoss",
@@ -43,7 +43,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "use_class_weights": True,
 
     # Logging
-    "experiment_name": "refactor-unet-sliding-window",
+    "experiment_name": "replying-unet-icmbio",
     "use_wandb": False,
 
     # Sistema

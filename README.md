@@ -36,7 +36,7 @@ As configs principais ficam em:
 
 ```text
 configs/experiments/unet_baseline.yaml
-configs/experiments/deeplabv3plus_baseline.yaml
+configs/experiments/deeplabv3_baseline.yaml
 ```
 
 Para trocar o modelo, altere apenas os campos de modelo na config:
@@ -52,7 +52,7 @@ num_classes: 5
 Exemplo para DeepLabV3+:
 
 ```yaml
-architecture: deeplabv3plus
+architecture: deeplabv3
 encoder_name: efficientnet-b5
 encoder_weights: imagenet
 in_channels: 3
@@ -117,7 +117,7 @@ PYTHONPATH=. python train_code.py --config configs/experiments/unet_baseline.yam
 Rodar DeepLabV3+ com YAML:
 
 ```bash
-PYTHONPATH=. python train_code.py --config configs/experiments/deeplabv3plus_baseline.yaml
+PYTHONPATH=. python train_code.py --config configs/experiments/deeplabv3_baseline.yaml
 ```
 
 As saidas sao salvas em `experiments/<nome_do_experimento>_<timestamp>/`, incluindo:
@@ -143,10 +143,10 @@ Rodar UNet em segundo plano:
 nohup bash -lc 'source venv/bin/activate && PYTHONPATH=. python train_code.py --config configs/experiments/unet_baseline.yaml' > logs/unet_baseline.log 2>&1 &
 ```
 
-Rodar DeepLabV3+ em segundo plano:
+Rodar DeepLabV3 em segundo plano:
 
 ```bash
-nohup bash -lc 'source venv/bin/activate && PYTHONPATH=. python train_code.py --config configs/experiments/deeplabv3plus_baseline.yaml' > logs/deeplabv3plus_baseline.log 2>&1 &
+nohup bash -lc 'source venv/bin/activate && PYTHONPATH=. python train_code.py --config configs/experiments/deeplabv3_baseline.yaml' > logs/deeplabv3_baseline.log 2>&1 &
 ```
 
 Verificar o log durante a execucao:

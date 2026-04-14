@@ -1,5 +1,5 @@
 # Altere apenas o bloco de modelo para comparar a arquitetura com justiça.
-experiment_name: deeplabv3plus-efficientnet-b5-sliding-window
+experiment_name: deeplabv3-efficientnet-b5-sliding-window
 
 train_txt: data-segments/train_sample.txt
 val_txt: data-segments/validation_sample.txt
@@ -12,7 +12,7 @@ patch_size: 512
 patch_step: 512
 inference_overlap: 256
 
-architecture: deeplabv3plus
+architecture: deeplabv3
 encoder_name: efficientnet-b5
 encoder_weights: imagenet
 in_channels: 3
