@@ -41,7 +41,7 @@ def calculate_metrics(pred, target, num_classes):
     if valid_classes_mask.sum() > 0:
         m_iou = iou_per_class[valid_classes_mask].mean()
     else:
-        m_iou = torch.tensor(0.0, device='cuda')
+        m_iou = torch.tensor(0.0, device=pred.device)
 
     # Accuracy comentada devido estarmos olhando apenas o iou e mean iou
 

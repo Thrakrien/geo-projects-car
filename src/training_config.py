@@ -45,9 +45,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # Logging
     "experiment_name": "replying-unet-icmbio-32-step",
     "use_wandb": False,
+    "log_every_n_batches": 0,
 
     # Sistema
     "num_workers": 4,
+    "persistent_workers": True,
+    "prefetch_factor": 2,
+    "use_amp": True,
+    "cudnn_benchmark": True,
     "seed": 42,
 }
 

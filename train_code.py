@@ -1,5 +1,6 @@
 import argparse
 import time
+from contextlib import nullcontext
 from datetime import timedelta
 import torch
 import torch.nn as nn
@@ -22,6 +23,10 @@ from src.training_config import load_config, model_config
 from torchmetrics.functional.segmentation import mean_iou
 from torchmetrics.functional.classification import multiclass_accuracy
 # import wandb  # Opcional: pip install wandb
+try:
+    import psutil
+except ImportError:
+    psutil = None
 
 
 def compute_class_weights(
@@ -261,37 +266,104 @@ def calculate_metrics(pred, target, num_classes):
     )
 
 # ===================== TREINAMENTO =====================
-def train_one_epoch(model, dataloader, criterion, optimizer, device, num_classes):
+def _memory_snapshot(device: torch.device) -> dict[str, float]:
+    """Return lightweight RAM/VRAM diagnostics for optional batch logging."""
+    stats = {}
+    if device.type == "cuda":
+        stats.update({
+            "vram_alloc_gb": torch.cuda.memory_allocated() / 1024 ** 3,
+            "vram_reserved_gb": torch.cuda.memory_reserved() / 1024 ** 3,
+            "vram_peak_gb": torch.cuda.max_memory_allocated() / 1024 ** 3,
+        })
+    if psutil is not None:
+        stats["ram_gb"] = psutil.Process().memory_info().rss / 1024 ** 3
+    return stats
+
+
+def _autocast_context(device, use_amp):
+    """Create an autocast context only when CUDA mixed precision is enabled."""
+    if device.type == "cuda" and use_amp:
+        return torch.cuda.amp.autocast()
+    return nullcontext()
+
+
+def _log_batch_diagnostics(
+        phase: str,
+        batch_idx: int,
+        data_time: float,
+        step_time: float,
+        device: torch.device) -> None:
+    """Print timing and memory diagnostics without affecting training state."""
+    memory = _memory_snapshot(device)
+    memory_msg = " ".join(
+        f"{key}={value:.2f}" for key, value in memory.items()
+    )
+    print(
+        f"{phase} batch={batch_idx} "
+        f"data_time={data_time:.3f}s step_time={step_time:.3f}s "
+        f"{memory_msg}"
+    )
+
+
+def train_one_epoch(
+        model,
+        dataloader,
+        criterion,
+        optimizer,
+        device,
+        num_classes,
+        scaler,
+        use_amp=False,
+        log_every_n_batches=0):
     """Treina o modelo por uma época"""
     model.train()
     running_loss = 0.0
     running_iou = 0.0
     iou_per_class = 0.0
+    non_blocking = device.type == "cuda"
+    previous_batch_end = time.perf_counter()
     
-    for images, masks in tqdm(dataloader, desc="Training"):
-        images = images.to(device)
-        masks = masks.to(device)
+    for batch_idx, (images, masks) in enumerate(tqdm(dataloader, desc="Training")):
+        data_time = time.perf_counter() - previous_batch_end
+        step_start = time.perf_counter()
+        images = images.to(device, non_blocking=non_blocking)
+        masks = masks.to(device, non_blocking=non_blocking)
         
         # Forward pass
-        optimizer.zero_grad()
-        outputs = model(images)
-        loss = criterion(outputs, masks)
+        optimizer.zero_grad(set_to_none=True)
+        with _autocast_context(device, use_amp):
+            outputs = model(images)
+            loss = criterion(outputs, masks)
         # loss = criterion(outputs, masks.unsqueeze(1).float())
         
         # Backward pass
-        loss.backward()
-        optimizer.step()
+        if scaler is not None and use_amp and device.type == "cuda":
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            loss.backward()
+            optimizer.step()
         
         # Métricas
-        running_loss += loss.item()
-        pred = torch.argmax(outputs, dim=1)
-        # probs = torch.sigmoid(outputs)
-            ## pred = (probs > 0.5).float()
-        # pred = (probs > 0.5).long().squeeze(1)
-        # pred = pred.squeeze(0).squeeze(0).cpu().numpy()
-        mean_iou, iou_per_class = calculate_metrics(pred, masks, num_classes)
+        running_loss += loss.detach().item()
+        with torch.no_grad():
+            pred = torch.argmax(outputs.detach(), dim=1)
+            mean_iou, iou_per_class = calculate_metrics(pred, masks, num_classes)
         running_iou += mean_iou
         # running_pixel_acc += pixel_acc
+        if log_every_n_batches and batch_idx % log_every_n_batches == 0:
+            if device.type == "cuda":
+                torch.cuda.synchronize()
+            step_time = time.perf_counter() - step_start
+            _log_batch_diagnostics(
+                "train",
+                batch_idx,
+                data_time,
+                step_time,
+                device
+            )
+        previous_batch_end = time.perf_counter()
 
     
     epoch_loss = running_loss / len(dataloader)
@@ -301,24 +373,36 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device, num_classes
     return epoch_loss, epoch_iou #, epoch_pixel_acc
 
 
-def validate(model, dataloader, criterion, device, num_classes):
+def validate(
+        model,
+        dataloader,
+        criterion,
+        device,
+        num_classes,
+        use_amp=False,
+        log_every_n_batches=0):
     """Valida o modelo"""
     model.eval()
     running_loss = 0.0
     running_iou = 0.0
     # running_pixel_acc = 0.0
     iou_per_class = 0.0
+    non_blocking = device.type == "cuda"
+    previous_batch_end = time.perf_counter()
     
-    with torch.no_grad():
-        for images, masks in tqdm(dataloader, desc="Validation"):
-            images = images.to(device)
-            masks = masks.to(device)
+    with torch.inference_mode():
+        for batch_idx, (images, masks) in enumerate(tqdm(dataloader, desc="Validation")):
+            data_time = time.perf_counter() - previous_batch_end
+            step_start = time.perf_counter()
+            images = images.to(device, non_blocking=non_blocking)
+            masks = masks.to(device, non_blocking=non_blocking)
             
-            outputs = model(images)
-            loss = criterion(outputs, masks)
+            with _autocast_context(device, use_amp):
+                outputs = model(images)
+                loss = criterion(outputs, masks)
             # loss = criterion(outputs, masks.unsqueeze(1).float())
             
-            running_loss += loss.item()
+            running_loss += loss.detach().item()
             pred = torch.argmax(outputs, dim=1)
             # probs = torch.sigmoid(outputs)
             ## pred = (probs > 0.5).float()
@@ -328,6 +412,18 @@ def validate(model, dataloader, criterion, device, num_classes):
             #pixel_acc, _ = calculate_metrics(pred, masks, num_classes)
             running_iou += mean_iou
             # running_pixel_acc += pixel_acc
+            if log_every_n_batches and batch_idx % log_every_n_batches == 0:
+                if device.type == "cuda":
+                    torch.cuda.synchronize()
+                step_time = time.perf_counter() - step_start
+                _log_batch_diagnostics(
+                    "val",
+                    batch_idx,
+                    data_time,
+                    step_time,
+                    device
+                )
+            previous_batch_end = time.perf_counter()
     
     epoch_loss = running_loss / len(dataloader)
     epoch_iou = running_iou / len(dataloader)
@@ -361,6 +457,13 @@ def main() -> None:
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     config['device'] = str(device)
     print(f"Using device: {device}")
+    use_amp = bool(config.get("use_amp", True)) and device.type == "cuda"
+    log_every_n_batches = int(config.get("log_every_n_batches", 0))
+    if device.type == "cuda":
+        torch.backends.cudnn.benchmark = bool(
+            config.get("cudnn_benchmark", True)
+        )
+        torch.cuda.reset_peak_memory_stats()
     
     # ========== LOGGER ==========
     logger = ExperimentLogger(
@@ -441,8 +544,10 @@ def main() -> None:
     best_val_iou = 0.0
     train_losses, val_losses = [], []
     train_ious, val_ious = [], []
+    scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
     
     for epoch in range(config['num_epochs']):
+        epoch_start = time.perf_counter()
         print(f"\n{'='*60}")
         print(f"Epoch {epoch+1}/{config['num_epochs']}")
         print(f"{'='*60}")
@@ -453,7 +558,15 @@ def main() -> None:
         # )
 
         train_loss, train_iou = train_one_epoch(
-            model, train_loader, criterion, optimizer, device, config['num_classes']
+            model,
+            train_loader,
+            criterion,
+            optimizer,
+            device,
+            config['num_classes'],
+            scaler,
+            use_amp=use_amp,
+            log_every_n_batches=log_every_n_batches
         )
         # Validar
         # val_loss, val_iou, val_pixel_acc = validate(
@@ -461,12 +574,19 @@ def main() -> None:
         # )
 
         val_loss, val_iou = validate(
-            model, val_loader, criterion, device, config['num_classes']
+            model,
+            val_loader,
+            criterion,
+            device,
+            config['num_classes'],
+            use_amp=use_amp,
+            log_every_n_batches=log_every_n_batches
         )
         
         # Atualizar learning rate
-        scheduler.step(val_loss)
+        scheduler.step()
         current_lr = optimizer.param_groups[0]['lr']
+        epoch_time = time.perf_counter() - epoch_start
         
         # Salvar métricas
         train_losses.append(train_loss)
@@ -491,6 +611,7 @@ def main() -> None:
         print(f"Train Loss: {train_loss:.4f} | Train IoU: {train_iou:.4f}")
         print(f"Val Loss: {val_loss:.4f} | Val IoU: {val_iou:.4f}")
         print(f"Learning Rate: {current_lr:.6f}")
+        print(f"Epoch Time: {timedelta(seconds=epoch_time)}")
         
         # Salvar melhor modelo
         if val_iou > best_val_iou:

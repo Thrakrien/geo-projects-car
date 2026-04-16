@@ -3,7 +3,6 @@ import os
 from typing import Callable, Optional, Tuple
 
 import numpy as np
-from patchify import patchify
 from PIL import Image
 import torch
 from torch.utils.data import DataLoader, Dataset
@@ -84,30 +83,18 @@ def extract_patch_pair(
         grid: PatchGrid,
         patch_idx: int) -> ImageMaskPair:
     """Extract aligned image and mask patches from the same grid index."""
-    image_np = np.array(image)
-    mask_np = np.array(mask)
-
-    image_patches = patchify(
-        image_np,
-        (grid.patch_size, grid.patch_size, 3),
-        step=grid.step
-    )
-    mask_patches = patchify(
-        mask_np,
-        (grid.patch_size, grid.patch_size),
-        step=grid.step
-    )
-
     patch_row = patch_idx // grid.patches_per_row
     patch_col = patch_idx % grid.patches_per_row
-
-    image_patch = image_patches[patch_row, patch_col, 0]
-    mask_patch = mask_patches[patch_row, patch_col]
-
-    return (
-        Image.fromarray(image_patch.astype("uint8")),
-        Image.fromarray(mask_patch.astype("uint8"))
+    y_min = patch_row * grid.step
+    x_min = patch_col * grid.step
+    crop_box = (
+        x_min,
+        y_min,
+        x_min + grid.patch_size,
+        y_min + grid.patch_size,
     )
+
+    return image.crop(crop_box), mask.crop(crop_box)
 
 
 def apply_image_transform(
@@ -238,20 +225,28 @@ def create_segmentation_dataloaders(
         step=config.get("patch_step", config["patch_size"])
     )
 
+    loader_kwargs = {
+        "batch_size": config["batch_size"],
+        "num_workers": config["num_workers"],
+        "pin_memory": torch.cuda.is_available(),
+    }
+    if config["num_workers"] > 0:
+        loader_kwargs["persistent_workers"] = config.get(
+            "persistent_workers",
+            True
+        )
+        loader_kwargs["prefetch_factor"] = config.get("prefetch_factor", 2)
+
     train_loader = DataLoader(
         train_dataset,
-        batch_size=config["batch_size"],
         shuffle=True,
-        num_workers=config["num_workers"],
-        pin_memory=True
+        **loader_kwargs
     )
 
     val_loader = DataLoader(
         val_dataset,
-        batch_size=config["batch_size"],
         shuffle=False,
-        num_workers=config["num_workers"],
-        pin_memory=True
+        **loader_kwargs
     )
 
     return train_dataset, val_dataset, train_loader, val_loader
