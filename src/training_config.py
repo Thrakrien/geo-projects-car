@@ -8,8 +8,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # Dados
     "train_txt": "data-segments/train_sample.txt",
     "val_txt": "data-segments/validation_sample.txt",
-    "images_dir": "/data/integracar/replicate_article/satelite_images/",
-    "masks_dir": "/data/integracar/replicate_article/masks_replicated_full/",
+    "images_dir": "/home/calebe/data/satelite_images/",
+    "masks_dir": "/home/calebe/data/masks_replicated_full/",
 
     # Patchify
     "use_patches": True,

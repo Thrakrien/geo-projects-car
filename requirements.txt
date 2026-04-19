@@ -10,6 +10,7 @@ matplotlib
 scikit-learn
 scipy
 PyYAML
-timmd
+torchmetrics
+#timmd
 safetensors
 huggingface-hub
