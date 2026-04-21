@@ -129,6 +129,93 @@ As saidas sao salvas em `experiments/<nome_do_experimento>_<timestamp>/`, inclui
 - figuras de resumo e overlays
 - `summary.json`
 
+## Rodar Inferencia e Avaliacao no Teste
+
+O script `predict_test.py` foi criado para avaliar um checkpoint treinado no conjunto de teste, reaproveitando a mesma configuracao espacial do projeto, incluindo `patch_size`, `inference_stride`, normalizacao e reconstrucao por sliding window quando `use_patches` estiver ativo.
+
+O fluxo do script e:
+
+- carregar o checkpoint e a configuracao do experimento;
+- reconstruir a predicao final da imagem inteira a partir dos patches, quando aplicavel;
+- comparar a predicao reconstruida com a mascara ground truth completa;
+- acumular a matriz de confusao global;
+- calcular IoU por classe, mIoU, precision, recall e F1-score;
+- salvar os artefatos finais em disco.
+
+Exemplo usando config YAML:
+
+```bash
+PYTHONPATH=. venv/bin/python predict_test.py \
+  --checkpoint experiments/<nome_do_experimento>/best_model.pth \
+  --config configs/experiments/unet_baseline.yaml \
+  --test-txt data-segments/test.txt \
+  --output-dir experiments/<nome_do_experimento>/test_eval \
+  --save-predictions
+```
+
+Se o checkpoint ja tiver sido salvo com `config` embutida, tambem e possivel rodar sem `--config`:
+
+```bash
+PYTHONPATH=. venv/bin/python predict_test.py \
+  --checkpoint experiments/<nome_do_experimento>/best_model.pth \
+  --test-txt data-segments/test.txt \
+  --output-dir experiments/<nome_do_experimento>/test_eval
+```
+
+Para sobrescrever caminhos da config pela linha de comando:
+
+```bash
+PYTHONPATH=. venv/bin/python predict_test.py \
+  --checkpoint experiments/<nome_do_experimento>/best_model.pth \
+  --config configs/experiments/unet_baseline.yaml \
+  --test-txt data-segments/test.txt \
+  --test-images /caminho/para/imagens_teste \
+  --test-masks /caminho/para/mascaras_teste \
+  --output-dir experiments/<nome_do_experimento>/test_eval
+```
+
+Argumentos mais uteis:
+
+- `--checkpoint`: caminho do checkpoint `.pth`;
+- `--config`: arquivo YAML/JSON do experimento;
+- `--test-txt`: lista de nomes de imagens do split de teste;
+- `--test-images`: diretorio das imagens de teste;
+- `--test-masks`: diretorio das mascaras de teste;
+- `--output-dir`: pasta onde os resultados serao salvos;
+- `--batch-size`: batch interno para inferencia dos patches;
+- `--num-classes`: sobrescreve o numero de classes;
+- `--ignore-index`: sobrescreve o indice ignorado na avaliacao;
+- `--save-predictions`: salva as mascaras reconstruidas previstas;
+- `--use-patches`: forca inferencia com sliding window;
+- `--no-patches`: forca inferencia em imagem inteira.
+
+As saidas do `predict_test.py` incluem:
+
+- `confusion_matrix.csv`
+- `class_metrics.csv`
+- `summary.json`
+- `predictions/`, quando `--save-predictions` for usado
+
+Durante a execucao, o terminal exibe:
+
+- `mIoU`;
+- `IoU` por classe;
+- `precision` por classe;
+- `recall` por classe;
+- `F1-score` por classe.
+
+Para rodar a avaliacao em segundo plano com `nohup`:
+
+```bash
+nohup bash -lc 'source venv/bin/activate && PYTHONPATH=. python predict_test.py --checkpoint experiments/<nome_do_experimento>/best_model.pth --config configs/experiments/unet_baseline.yaml --test-txt data-segments/test.txt --output-dir experiments/<nome_do_experimento>/test_eval --save-predictions' > logs/predict_test.log 2>&1 &
+```
+
+Para acompanhar o log da avaliacao:
+
+```bash
+tail -f logs/predict_test.log
+```
+
 ## Rodar em Segundo Plano com nohup
 
 Crie uma pasta para logs, se ainda nao existir:
