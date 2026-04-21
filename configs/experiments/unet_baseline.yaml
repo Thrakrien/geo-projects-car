@@ -1,5 +1,5 @@
 # Baseline equivalente ao treino atual, com saida em logits crus.
-experiment_name: replying-unet-icmbio_64_overlap
+experiment_name: replying-unet-icmbio_200_batch
 
 train_txt: data-segments/train_sample.txt
 val_txt: data-segments/validation_sample.txt
@@ -9,8 +9,8 @@ masks_dir: /home/calebe/data/masks_replicated_full/
 use_patches: true
 image_size: 2048
 patch_size: 256
-patch_step: 64
-inference_overlap: 64
+patch_step: 32
+inference_overlap: 32
 
 architecture: unet
 encoder_name: efficientnet-b5
@@ -18,9 +18,9 @@ encoder_weights: imagenet
 in_channels: 3
 num_classes: 5
 
-batch_size: 8
+batch_size: 200
 num_epochs: 100
-learning_rate: 0.01
+learning_rate: 0.5
 weight_decay: 0.0005
 
 optimizer: SGD
