@@ -236,10 +236,22 @@ Rodar DeepLabV3 em segundo plano:
 nohup bash -lc 'source venv/bin/activate && PYTHONPATH=. python train_code.py --config configs/experiments/deeplabv3_baseline.yaml' > logs/deeplabv3_baseline.log 2>&1 &
 ```
 
+Retomar um treinamento interrompido a partir do ultimo checkpoint salvo:
+
+```bash
+nohup bash -lc 'source venv/bin/activate && PYTHONPATH=. python train_code.py --resume experiments/<nome_do_experimento>/last_checkpoint.pth' > logs/resume_training.log 2>&1 &
+```
+
+Se quiser retomar informando explicitamente a config YAML:
+
+```bash
+nohup bash -lc 'source venv/bin/activate && PYTHONPATH=. python train_code.py --config configs/experiments/unet_baseline.yaml --resume experiments/<nome_do_experimento>/last_checkpoint.pth' > logs/resume_unet_baseline.log 2>&1 &
+```
+
 Verificar o log durante a execucao:
 
 ```bash
-tail -f logs/unet_baseline.log
+tail -f logs/resume_training.log
 ```
 
 Listar processos relacionados ao treino:

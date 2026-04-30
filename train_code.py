@@ -16,10 +16,11 @@ from matplotlib.colors import ListedColormap
 import json
 import csv
 from datetime import datetime
+from typing import Any
 from src.dataset import create_segmentation_dataloaders
 from src.inference import PatchifyInference
 from src.models import build_model
-from src.training_config import load_config, model_config
+from src.training_config import load_config, model_config, resolve_config
 from torchmetrics.functional.segmentation import mean_iou
 from torchmetrics.functional.classification import multiclass_accuracy
 # import wandb  # Opcional: pip install wandb
@@ -87,17 +88,26 @@ class ExperimentLogger:
     """
     Logger para registrar experimentos de mestrado com múltiplos backends
     """
-    def __init__(self, experiment_name, config, log_dir='experiments', use_wandb=False):
+    def __init__(
+            self,
+            experiment_name,
+            config,
+            log_dir='experiments',
+            use_wandb=False,
+            resume_dir=None):
         self.experiment_name = experiment_name
         self.config = config
         self.use_wandb = use_wandb
         
-        # Criar timestamp
-        self.timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        self.run_name = f"{experiment_name}_{self.timestamp}"
-        
-        # Criar diretório de experimento
-        self.exp_dir = os.path.join(log_dir, self.run_name)
+        if resume_dir is None:
+            self.timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            self.run_name = f"{experiment_name}_{self.timestamp}"
+            self.exp_dir = os.path.join(log_dir, self.run_name)
+        else:
+            self.exp_dir = resume_dir
+            self.run_name = os.path.basename(os.path.normpath(resume_dir))
+            self.timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
         os.makedirs(self.exp_dir, exist_ok=True)
         
         # Salvar configuração
@@ -107,13 +117,15 @@ class ExperimentLogger:
         
         # Inicializar CSV para métricas
         self.metrics_csv = os.path.join(self.exp_dir, 'metrics.csv')
-        with open(self.metrics_csv, 'w', newline='') as f:
+        should_write_header = not os.path.exists(self.metrics_csv)
+        with open(self.metrics_csv, 'a', newline='') as f:
             writer = csv.writer(f)
             # writer.writerow(['epoch', 'train_loss', 'train_iou', 'train_pixel_acc', 
             #                 'val_loss', 'val_iou', 'val_pixel_acc', 'learning_rate'])
 
-            writer.writerow(['epoch', 'train_loss', 'train_iou', 
-                            'val_loss', 'val_iou', 'learning_rate'])
+            if should_write_header:
+                writer.writerow(['epoch', 'train_loss', 'train_iou',
+                                'val_loss', 'val_iou', 'learning_rate'])
         
         # Inicializar Weights & Biases
         if self.use_wandb:
@@ -144,13 +156,27 @@ class ExperimentLogger:
         if self.use_wandb:
             wandb.log(metrics, step=epoch)
     
-    def log_model(self, model, optimizer, epoch, metrics, filename='best_model.pth'):
+    def log_model(
+            self,
+            model,
+            optimizer,
+            epoch,
+            metrics,
+            filename='best_model.pth',
+            scheduler=None,
+            best_miou=None,
+            best_val_loss=None):
         """Salva checkpoint do modelo"""
         checkpoint_path = os.path.join(self.exp_dir, filename)
         torch.save({
             'epoch': epoch,
             'model_state_dict': model.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
+            'scheduler_state_dict': (
+                scheduler.state_dict() if scheduler is not None else None
+            ),
+            'best_miou': best_miou,
+            'best_val_loss': best_val_loss,
             'metrics': metrics,
             'config': self.config
         }, checkpoint_path)
@@ -203,6 +229,84 @@ class ExperimentLogger:
         if self.use_wandb:
             wandb.finish()
         print(f"✅ Experimento finalizado: {self.run_name}")
+
+
+def load_checkpoint(
+        checkpoint_path: str,
+        model: nn.Module,
+        optimizer: optim.Optimizer,
+        scheduler: Any,
+        scaler: Any,
+        device: torch.device) -> tuple[int, float, float]:
+    """Load training state from a checkpoint.
+
+    Args:
+        checkpoint_path: Path to the checkpoint file.
+        model: Model instance to restore.
+        optimizer: Optimizer instance to restore.
+        scheduler: Optional scheduler instance to restore.
+        scaler: Optional AMP GradScaler instance to restore.
+        device: Device used as ``map_location``.
+
+    Returns:
+        Tuple with start epoch, best mIoU, and best validation loss.
+    """
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    if not isinstance(checkpoint, dict):
+        raise ValueError("Checkpoint inválido: esperado um dicionário.")
+
+    model.load_state_dict(checkpoint["model_state_dict"])
+    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+
+    scheduler_state = checkpoint.get("scheduler_state_dict")
+    if scheduler is not None and scheduler_state is not None:
+        scheduler.load_state_dict(scheduler_state)
+
+    scaler_state = checkpoint.get("scaler_state_dict")
+    if scaler is not None and scaler_state is not None:
+        scaler.load_state_dict(scaler_state)
+
+    metrics = checkpoint.get("metrics", {})
+    checkpoint_epoch = int(checkpoint["epoch"])
+    start_epoch = checkpoint_epoch + 1
+    best_miou = checkpoint.get(
+        "best_miou",
+        checkpoint.get("best_val_iou", metrics.get("val_iou", 0.0))
+    )
+    best_val_loss = checkpoint.get(
+        "best_val_loss",
+        metrics.get("val_loss", float("inf"))
+    )
+
+    return start_epoch, float(best_miou), float(best_val_loss)
+
+
+def save_training_checkpoint(
+        output_dir: str,
+        epoch: int,
+        model: nn.Module,
+        optimizer: optim.Optimizer,
+        scheduler: Any,
+        scaler: Any,
+        best_miou: float,
+        best_val_loss: float,
+        config: dict[str, Any]) -> None:
+    """Save the latest training state, overwriting the previous file."""
+    checkpoint = {
+        "epoch": epoch,
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "scheduler_state_dict": (
+            scheduler.state_dict() if scheduler is not None else None
+        ),
+        "best_miou": best_miou,
+        "best_val_loss": best_val_loss,
+        "config": config,
+    }
+    if scaler is not None:
+        checkpoint["scaler_state_dict"] = scaler.state_dict()
+
+    torch.save(checkpoint, os.path.join(output_dir, "last_checkpoint.pth"))
 
 
 # ===================== MÉTRICAS =====================
@@ -440,6 +544,11 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Optional YAML or JSON experiment config path."
     )
+    parser.add_argument(
+        "--resume",
+        default=None,
+        help="Optional checkpoint path to resume training from."
+    )
     return parser.parse_args()
 
 
@@ -447,7 +556,18 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     # ========== CONFIGURAÇÕES ==========
     args = parse_args()
-    config = load_config(args.config)
+    resume_checkpoint = None
+    if args.resume:
+        resume_checkpoint = torch.load(args.resume, map_location="cpu")
+        if not isinstance(resume_checkpoint, dict):
+            raise ValueError("Checkpoint inválido: esperado um dicionário.")
+
+    if args.config:
+        config = load_config(args.config)
+    elif resume_checkpoint is not None and "config" in resume_checkpoint:
+        config = resolve_config(resume_checkpoint["config"])
+    else:
+        config = load_config()
     
     # Seed para reprodutibilidade
     torch.manual_seed(config['seed']) # config['seed']
@@ -466,10 +586,15 @@ def main() -> None:
         torch.cuda.reset_peak_memory_stats()
     
     # ========== LOGGER ==========
+    resume_dir = None
+    if args.resume:
+        resume_dir = os.path.dirname(os.path.abspath(args.resume))
+
     logger = ExperimentLogger(
         experiment_name=config['experiment_name'],
         config=config,
-        use_wandb=config['use_wandb']
+        use_wandb=config['use_wandb'],
+        resume_dir=resume_dir
     )
     
     # ========== TRANSFORMAÇÕES ==========
@@ -541,12 +666,32 @@ def main() -> None:
     )
     
     # ========== TREINAMENTO ==========
-    best_val_iou = 0.0
+    start_epoch = 0
+    best_miou = 0.0
+    best_val_loss = float("inf")
     train_losses, val_losses = [], []
     train_ious, val_ious = [], []
     scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
+
+    if args.resume:
+        start_epoch, best_miou, best_val_loss = load_checkpoint(
+            checkpoint_path=args.resume,
+            model=model,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            scaler=scaler,
+            device=device
+        )
+        print(f"🔁 Retomando treinamento de: {args.resume}")
+        print(f"🔁 Última época concluída: {start_epoch - 1}")
+        print(f"🔁 Próxima época: {start_epoch + 1}/{config['num_epochs']}")
+        print(f"🔁 Melhor mIoU carregado: {best_miou:.4f}")
+        if best_val_loss != float("inf"):
+            print(f"🔁 Melhor Val Loss carregado: {best_val_loss:.4f}")
+    else:
+        print("🚀 Iniciando treinamento do zero.")
     
-    for epoch in range(config['num_epochs']):
+    for epoch in range(start_epoch, config['num_epochs']):
         epoch_start = time.perf_counter()
         print(f"\n{'='*60}")
         print(f"Epoch {epoch+1}/{config['num_epochs']}")
@@ -614,10 +759,36 @@ def main() -> None:
         print(f"Epoch Time: {timedelta(seconds=epoch_time)}")
         
         # Salvar melhor modelo
-        if val_iou > best_val_iou:
-            best_val_iou = val_iou
-            logger.log_model(model, optimizer, epoch, metrics, 'best_model.pth')
+        best_val_loss = min(best_val_loss, val_loss)
+        if val_iou > best_miou:
+            best_miou = val_iou
+            logger.log_model(
+                model,
+                optimizer,
+                epoch,
+                metrics,
+                'best_model.pth',
+                scheduler=scheduler,
+                best_miou=best_miou,
+                best_val_loss=best_val_loss
+            )
             print(f"✓ Melhor modelo salvo com Val IoU: {val_iou:.4f}")
+
+        save_training_checkpoint(
+            output_dir=logger.exp_dir,
+            epoch=epoch,
+            model=model,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            scaler=scaler,
+            best_miou=best_miou,
+            best_val_loss=best_val_loss,
+            config=config
+        )
+        print(
+            "💾 Checkpoint atualizado: "
+            f"{os.path.join(logger.exp_dir, 'last_checkpoint.pth')}"
+        )
     
     # ========== DEMONSTRAÇÃO DE INFERÊNCIA COM PATCHIFY ==========
     print(f"\n{'='*60}")
@@ -726,7 +897,7 @@ def main() -> None:
     Image Size: {config['image_size']}x{config['image_size']}
     Patch Size: {config['patch_size']}x{config['patch_size']}
     
-    Melhor Val IoU: {best_val_iou:.4f}
+    Melhor Val IoU: {best_miou:.4f}
     Final Train Loss: {train_losses[-1]:.4f}
     Final Val Loss: {val_losses[-1]:.4f}
     
@@ -766,7 +937,7 @@ def main() -> None:
     
     # ========== SALVAR RESUMO FINAL ==========
     summary = {
-        'best_val_iou': best_val_iou,
+        'best_val_iou': best_miou,
         'final_train_loss': train_losses[-1],
         'final_val_loss': val_losses[-1],
         'final_train_iou': train_ious[-1],
