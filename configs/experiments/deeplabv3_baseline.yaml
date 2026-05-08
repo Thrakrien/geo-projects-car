@@ -1,26 +1,26 @@
 # Altere apenas o bloco de modelo para comparar a arquitetura com justiça.
-experiment_name: deeplabv3-efficientnet-b5-sliding-window
+experiment_name: deeplabv3-resnet50
 
 train_txt: data-segments/train_sample.txt
 val_txt: data-segments/validation_sample.txt
-images_dir: /data/integracar/replicate_article/satelite_images/
-masks_dir: /data/integracar/replicate_article/masks_replicated_full/
+images_dir: /home/calebe/data/satelite_images/
+masks_dir: /home/calebe/data/masks_replicated_full/
 
 use_patches: true
 image_size: 2048
 patch_size: 512
-patch_step: 512
-inference_overlap: 256
+patch_step: 128
+inference_overlap: 128
 
 architecture: deeplabv3
-encoder_name: efficientnet-b5
+encoder_name: resnet50
 encoder_weights: imagenet
 in_channels: 3
 num_classes: 5
 
-batch_size: 5
-num_epochs: 20
-learning_rate: 0.01
+batch_size: 50
+num_epochs: 50
+learning_rate: 0.02
 weight_decay: 0.0005
 
 optimizer: SGD
