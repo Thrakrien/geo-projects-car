@@ -1,0 +1,6 @@
+Infraestrutura (Classe 0): 10.62% - 220524465 pixels
+Agropastoril (Classe 1): 27.73% - 575676440 pixels
+Áreas de Vegetação (Classe 2): 54.44% - 1130312179 pixels
+Macega (Classe 3): 5.99% - 124318511 pixels
+Massa D'Água (Classe 4): 1.23% - 25516919 pixels
+Total de pixels: 2076348514

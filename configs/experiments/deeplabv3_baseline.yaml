@@ -1,5 +1,5 @@
 # Altere apenas o bloco de modelo para comparar a arquitetura com justiça.
-experiment_name: deeplabv3-resnet50
+experiment_name: deeplabv3-resnet50-256
 
 train_txt: data-segments/train_sample.txt
 val_txt: data-segments/validation_sample.txt
