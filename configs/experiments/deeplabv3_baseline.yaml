@@ -1,5 +1,5 @@
 # Altere apenas o bloco de modelo para comparar a arquitetura com justiça.
-experiment_name: deeplabv3-resnet50-256
+experiment_name: deeplabv3-resnet50-128-002-lr
 
 train_txt: data-segments/train_sample.txt
 val_txt: data-segments/validation_sample.txt
@@ -18,8 +18,8 @@ encoder_weights: imagenet
 in_channels: 3
 num_classes: 5
 
-batch_size: 50
-num_epochs: 50
+batch_size: 200
+num_epochs: 100
 learning_rate: 0.02
 weight_decay: 0.0005
 
