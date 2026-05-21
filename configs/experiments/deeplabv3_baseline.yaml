@@ -1,5 +1,5 @@
 # Altere apenas o bloco de modelo para comparar a arquitetura com justiça.
-experiment_name: deeplabv3-resnet50-128-001-lr
+experiment_name: deeplabv3-resnet50-256-001-lr
 
 train_txt: data-segments/train_sample.txt
 val_txt: data-segments/validation_sample.txt
@@ -9,8 +9,8 @@ masks_dir: /home/calebe/data/masks_replicated_full/
 use_patches: true
 image_size: 2048
 patch_size: 512
-patch_step: 128
-inference_overlap: 128
+patch_step: 256
+inference_overlap: 256
 
 architecture: deeplabv3
 encoder_name: resnet50
